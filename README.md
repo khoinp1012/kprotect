@@ -1,5 +1,7 @@
 # 🛡️ kprotect
 
+![kprotect Dashboard](screenshots/dashboard.png)
+
 ## Overview
 kprotect is a kernel-level security engine designed to protect your sensitive data from supply-chain attacks (like malicious Python or Node.js libraries). It stands as an independent security layer for the most sensitive files.
 
@@ -28,11 +30,14 @@ Traditional security tools often look at *what* a file is. kprotect looks at *wh
 -   **Encrypted Configuration**: All policies, authorizations, and logs are encrypted at rest using **AES-256-GCM**, keyed by a hardware-bound or system-specific secret.
 -   **Rich Observability**:
     -   **Live Feed**: Real-time monitoring of process births, terminations, and blocked access attempts.
+        ![Live Event Feed](screenshots/live_feed.png)
     -   **Audit Logs**: Tamper-evident logs of all security-critical actions.
+        ![Event Notifications](screenshots/notifications.png)
 -   **Multiple Interfaces**:
     -   **kprotect-daemon**: The core engine running as a systemd service.
     -   **kprotect-cli**: Direct command-line management.
     -   **kprotect-gui**: A modern, sleek desktop application built with Tauri and React.
+        ![Authorized Patterns](screenshots/allowlist.png)
 -   **Dynamic Enrichment**: Captures process arguments for interpreters (Python, Node, Bash) to distinguish between `python safe_script.py` and `python malicious_script.py`.
 
 ---
