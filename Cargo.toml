@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = [
+    "kprotect-daemon", "kprotect-cli", "kprotect-client",
+    "kprotect-common", "xtask"
+]
+exclude = [
+    "kprotect-ebpf",
+    "kprotect-ui/src-tauri",
+    "gui_automation_test",
+]
+[workspace.package]
+version = "0.1.0-beta"
+edition = "2021"
+authors = ["khoinp1012"]
+license = "AGPL-3.0-or-later"
+[profile.release]
+lto = true
+opt-level = 3
+codegen-units = 1
+panic = "abort"

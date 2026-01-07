@@ -1,0 +1,10 @@
+{
+  "enrichment_patterns": [
+    "/usr/bin/python*",
+    "/usr/bin/node*",
+    "/usr/bin/perl*",
+    "/usr/bin/sh",
+    "/usr/bin/env",
+    "/bin/sh"
+  ]
+}

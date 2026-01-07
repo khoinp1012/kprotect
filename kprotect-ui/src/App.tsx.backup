@@ -1,0 +1,479 @@
+import { useState, useEffect } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { Shield, LayoutDashboard, List, Settings, Menu, ShieldCheck, Server, FileText, Zap, CheckCircle, Power } from "lucide-react";
+import "./App.css";
+import { invoke } from "@tauri-apps/api/core";
+
+import { Event, Stats } from "./types";
+import { Dashboard } from "./components/Dashboard";
+import { EventList } from "./components/EventList";
+import { Zones } from "./components/Zones";
+import { Capabilities } from "./components/Capabilities";
+import { AuthorizedPatterns } from "./components/AuthorizedPatterns";
+
+type Tab = 'dashboard' | 'events' | 'zones' | 'capabilities' | 'patterns';
+
+function App() {
+    const [events, setEvents] = useState<Event[]>([]);
+    const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+    const [isConnected, setIsConnected] = useState(false);
+    const [isRootActive, setIsRootActive] = useState(false);
+
+
+
+
+    // Computed stats
+    const stats: Stats = {
+        total: events.length,
+        verified: events.filter(e => e.type === 'VERIFIED').length,
+        ghosted: events.filter(e => e.type === 'GHOSTED').length,
+        birth: events.filter(e => e.type === 'BIRTH').length,
+    };
+
+    // Chart data
+    const chartData = events.slice(0, 50).reverse().map((e) => ({
+        time: new Date(e.timestamp).toLocaleTimeString(),
+        value: 1
+    }));
+
+    useEffect(() => {
+        let unlistenFn: (() => void) | undefined;
+        let isActive = true;
+
+        async function setupListener() {
+            // REMOVED: if (listeningRef.current) return;
+            // We rely on the cleanup function to handle unlistening correctly
+
+            try {
+                unlistenFn = await listen<any>("event", (payload) => {
+                    if (!isActive) return;
+                    setIsConnected(true);
+                    const raw = payload.payload;
+
+                    console.log("DEBUG: Received event from backend:", raw);
+
+                    let type: 'VERIFIED' | 'GHOSTED' | 'BIRTH' = 'VERIFIED';
+                    if (raw.status === 'GHOSTED') type = 'GHOSTED';
+                    if (raw.status === 'BIRTH') type = 'BIRTH';
+
+                    const newEvent: Event = {
+                        id: raw.id || 0, // Default to 0 if missing (should not happen with new daemon)
+                        timestamp: new Date().toISOString(),
+                        type,
+                        pid: raw.pid,
+                        chain: raw.chain || [],
+                        path: raw.target || raw.comm || "unknown",
+                        authorized: raw.authorized || false,
+                        complete: raw.complete !== undefined ? raw.complete : true // Default to true if missing? Or false? 
+                        // Daemon sends it, so undefined likely means old version -> treat as partial?
+                        // Actually daemon always sends it now.
+                    };
+
+                    console.log("DEBUG: Created event object:", newEvent);
+
+                    setEvents(prev => {
+                        // Basic dedup by checking the very last event if timestamp matches exactly 
+                        // (though real events might come fast, this helps with immediate double-fire)
+                        if (prev.length > 0 && prev[0].timestamp === newEvent.timestamp && prev[0].pid === newEvent.pid) {
+                            return prev;
+                        }
+                        return [newEvent, ...prev].slice(0, 1000);
+                    });
+                });
+            } catch (e) {
+                console.error("Failed to setup listener", e);
+            }
+        }
+
+        setupListener();
+
+        return () => {
+            isActive = false;
+            if (unlistenFn) unlistenFn();
+        };
+    }, []);
+
+    const handleTriggerRoot = async () => {
+        try {
+            // Spawn the worker (this will show pkexec prompt)
+            await invoke('trigger_test_activity');
+
+            // Poll for status - wait for authentication to actually complete
+            let attempts = 0;
+            const maxAttempts = 30;
+
+            while (attempts < maxAttempts) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+
+                try {
+                    const isActive = await invoke<boolean>('check_root_worker_status');
+                    if (isActive) {
+                        setIsRootActive(true);
+                        return;
+                    }
+                } catch (e) {
+                    console.error("Status check failed:", e);
+                }
+
+                attempts++;
+            }
+
+            alert("Root session timed out or authentication was canceled");
+        } catch (e) {
+            console.error(e);
+            alert(`Failed to start root session: ${e}`);
+        }
+    };
+
+    const handleStopRoot = async () => {
+        try {
+            await invoke('stop_root_worker');
+            setIsRootActive(false);
+        } catch (e) {
+            console.error(e);
+            alert(`Failed to stop root session: ${e}`);
+        }
+    };
+
+    const renderContent = () => {
+        switch (activeTab) {
+            case 'dashboard': return <Dashboard stats={stats} data={chartData} />;
+            case 'events': return <EventList
+                events={events}
+                onClear={() => setEvents([])}
+            />;
+            case 'zones': return <Zones />;
+            case 'capabilities': return <Capabilities />;
+            case 'patterns': return <AuthorizedPatterns />;
+            default: return <div className="text-zinc-500">Not implemented</div>;
+        }
+    };
+
+    const getTitle = () => {
+        switch (activeTab) {
+            case 'dashboard': return 'Overview';
+            case 'events': return 'Events';
+            case 'zones': return 'Policy Zones';
+            case 'capabilities': return 'Capabilities';
+            case 'patterns': return 'Authorized Patterns';
+        }
+    };
+
+    return (
+        <div className="flex h-screen bg-white text-zinc-900 overflow-hidden font-sans selection:bg-indigo-500/30">
+            {/* Navigation Rail (Light Theme) */}
+            <aside className="w-72 flex flex-col bg-zinc-50 border-r border-zinc-200">
+                <div className="p-6">
+                    <div className="flex items-center space-x-3 mb-8 px-2">
+                        <div className="p-2 bg-indigo-600 rounded-lg shadow-sm">
+                            <Shield className="text-white" size={24} strokeWidth={2.5} />
+                        </div>
+                        <div>
+                            <h1 className="text-lg font-bold text-zinc-900 tracking-tight">kprotect</h1>
+                            <div className="flex items-center space-x-2 mt-0.5">
+                                <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-rose-500'}`}></div>
+                                <span className="text-[10px] font-bold text-zinc-500 tracking-wider uppercase">
+                                    {isConnected ? 'Online' : 'Offline'}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <nav className="space-y-1">
+                        <NavItem
+                            active={activeTab === 'dashboard'}
+                            onClick={() => setActiveTab('dashboard')}
+                            icon={<LayoutDashboard size={20} />}
+                            label="Dashboard"
+                        />
+                        <NavItem
+                            active={activeTab === 'events'}
+                            onClick={() => setActiveTab('events')}
+                            icon={<List size={20} />}
+                            label="Live Feed"
+                            // Exclude BIRTH from the main badge count
+                            badge={events.filter(e => e.type !== 'BIRTH').length > 0 ? events.filter(e => e.type !== 'BIRTH').length.toString() : undefined}
+                        />
+                        <div className="my-4 border-t border-zinc-200 mx-2"></div>
+                        <span className="px-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest block mb-2">Configure</span>
+                        <NavItem
+                            active={activeTab === 'zones'}
+                            onClick={() => setActiveTab('zones')}
+                            icon={<ShieldCheck size={20} />}
+                            label="Zones"
+                        />
+                        <NavItem
+                            active={activeTab === 'patterns'}
+                            onClick={() => setActiveTab('patterns')}
+                            icon={<FileText size={20} />}
+                            label="Patterns"
+                        />
+                        <NavItem
+                            active={activeTab === 'capabilities'}
+                            onClick={() => setActiveTab('capabilities')}
+                            icon={<Server size={20} />}
+                            label="System"
+                        />
+                    </nav>
+                </div>
+
+                <div className="mt-auto p-4 border-t border-zinc-200">
+                    <NavItem icon={<Settings size={20} />} label="Settings" />
+                </div>
+            </aside>
+
+            {/* Main Content Area */}
+            <main className="flex-1 flex flex-col overflow-hidden bg-white">
+                {/* Top Bar - Light */}
+                <header className="h-16 flex items-center justify-between px-8 border-b border-zinc-200 bg-white">
+                    <h2 className="text-xl font-semibold text-zinc-900 tracking-tight">
+                        {getTitle()}
+                    </h2>
+                    <div className="flex items-center space-x-4">
+                        {/* Root Worker Controls */}
+                        {!isRootActive ? (
+                            <button
+                                type="button"
+                                onClick={handleTriggerRoot}
+                                className="flex items-center px-3 py-1.5 rounded-md text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors shadow-sm"
+                            >
+                                <Zap size={14} className="mr-1.5" fill="currentColor" />
+                                Trigger Root
+                            </button>
+                        ) : (
+                            <>
+                                <button
+                                    type="button"
+                                    className="flex items-center px-3 py-1.5 rounded-md text-xs font-bold text-white bg-emerald-600 shadow-sm cursor-default"
+                                >
+                                    <CheckCircle size={14} className="mr-1.5" />
+                                    Root Granted
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleStopRoot}
+                                    className="flex items-center px-3 py-1.5 rounded-md text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200 hover:border-rose-300 transition-colors"
+                                >
+                                    <Power size={14} className="mr-1.5" />
+                                    Stop Session
+                                </button>
+                            </>
+                        )}
+                        <button className="p-2 hover:bg-zinc-100 rounded-md text-zinc-500 hover:text-zinc-900 transition-colors">
+                            <Menu size={20} />
+                        </button>
+                    </div>
+                </header>
+
+
+
+
+
+    // Computed stats
+                const stats: Stats = {
+                    total: events.length,
+        verified: events.filter(e => e.type === 'VERIFIED').length,
+        ghosted: events.filter(e => e.type === 'GHOSTED').length,
+        birth: events.filter(e => e.type === 'BIRTH').length,
+    };
+
+    // Chart data
+    const chartData = events.slice(0, 50).reverse().map((e) => ({
+                    time: new Date(e.timestamp).toLocaleTimeString(),
+                value: 1
+    }));
+
+    useEffect(() => {
+                    let unlistenFn: (() => void) | undefined;
+                let isActive = true;
+
+                async function setupListener() {
+            // REMOVED: if (listeningRef.current) return;
+            // We rely on the cleanup function to handle unlistening correctly
+
+            try {
+                    unlistenFn = await listen<any>("event", (payload) => {
+                        if (!isActive) return;
+                        setIsConnected(true);
+                        const raw = payload.payload;
+
+                        console.log("DEBUG: Received event from backend:", raw);
+
+                        let type: 'VERIFIED' | 'GHOSTED' | 'BIRTH' = 'VERIFIED';
+                        if (raw.status === 'GHOSTED') type = 'GHOSTED';
+                        if (raw.status === 'BIRTH') type = 'BIRTH';
+
+                        const newEvent: Event = {
+                            id: raw.id || 0, // Default to 0 if missing (should not happen with new daemon)
+                            timestamp: new Date().toISOString(),
+                            type,
+                            pid: raw.pid,
+                            chain: raw.chain || [],
+                            path: raw.target || raw.comm || "unknown",
+                            authorized: raw.authorized || false,
+                            complete: raw.complete !== undefined ? raw.complete : true // Default to true if missing? Or false? 
+                            // Daemon sends it, so undefined likely means old version -> treat as partial?
+                            // Actually daemon always sends it now.
+                        };
+
+                        console.log("DEBUG: Created event object:", newEvent);
+
+                        setEvents(prev => {
+                            // Basic dedup by checking the very last event if timestamp matches exactly 
+                            // (though real events might come fast, this helps with immediate double-fire)
+                            if (prev.length > 0 && prev[0].timestamp === newEvent.timestamp && prev[0].pid === newEvent.pid) {
+                                return prev;
+                            }
+                            return [newEvent, ...prev].slice(0, 1000);
+                        });
+                    });
+            } catch (e) {
+                    console.error("Failed to setup listener", e);
+            }
+        }
+
+                setupListener();
+
+        return () => {
+                    isActive = false;
+                if (unlistenFn) unlistenFn();
+        };
+    }, []);
+
+    const renderContent = () => {
+        switch (activeTab) {
+            case 'dashboard': return <Dashboard stats={stats} data={chartData} />;
+                case 'events': return <EventList
+                    events={events}
+                    onClear={() => setEvents([])}
+                />;
+                case 'zones': return <Zones />;
+                case 'capabilities': return <Capabilities />;
+                case 'patterns': return <AuthorizedPatterns />;
+                default: return <div className="text-zinc-500">Not implemented</div>;
+        }
+    };
+
+    const getTitle = () => {
+        switch (activeTab) {
+            case 'dashboard': return 'Overview';
+                case 'events': return 'Events';
+                case 'zones': return 'Policy Zones';
+                case 'capabilities': return 'Capabilities';
+                case 'patterns': return 'Authorized Patterns';
+        }
+    };
+
+                return (
+                <div className="flex h-screen bg-white text-zinc-900 overflow-hidden font-sans selection:bg-indigo-500/30">
+                    {/* Navigation Rail (Light Theme) */}
+                    <aside className="w-72 flex flex-col bg-zinc-50 border-r border-zinc-200">
+                        <div className="p-6">
+                            <div className="flex items-center space-x-3 mb-8 px-2">
+                                <div className="p-2 bg-indigo-600 rounded-lg shadow-sm">
+                                    <Shield className="text-white" size={24} strokeWidth={2.5} />
+                                </div>
+                                <div>
+                                    <h1 className="text-lg font-bold text-zinc-900 tracking-tight">kprotect</h1>
+                                    <div className="flex items-center space-x-2 mt-0.5">
+                                        <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-rose-500'}`}></div>
+                                        <span className="text-[10px] font-bold text-zinc-500 tracking-wider uppercase">
+                                            {isConnected ? 'Online' : 'Offline'}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <nav className="space-y-1">
+                                <NavItem
+                                    active={activeTab === 'dashboard'}
+                                    onClick={() => setActiveTab('dashboard')}
+                                    icon={<LayoutDashboard size={20} />}
+                                    label="Dashboard"
+                                />
+                                <NavItem
+                                    active={activeTab === 'events'}
+                                    onClick={() => setActiveTab('events')}
+                                    icon={<List size={20} />}
+                                    label="Live Feed"
+                                    // Exclude BIRTH from the main badge count
+                                    badge={events.filter(e => e.type !== 'BIRTH').length > 0 ? events.filter(e => e.type !== 'BIRTH').length.toString() : undefined}
+                                />
+                                <div className="my-4 border-t border-zinc-200 mx-2"></div>
+                                <span className="px-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest block mb-2">Configure</span>
+                                <NavItem
+                                    active={activeTab === 'zones'}
+                                    onClick={() => setActiveTab('zones')}
+                                    icon={<ShieldCheck size={20} />}
+                                    label="Zones"
+                                />
+                                <NavItem
+                                    active={activeTab === 'patterns'}
+                                    onClick={() => setActiveTab('patterns')}
+                                    icon={<FileText size={20} />}
+                                    label="Patterns"
+                                />
+                                <NavItem
+                                    active={activeTab === 'capabilities'}
+                                    onClick={() => setActiveTab('capabilities')}
+                                    icon={<Server size={20} />}
+                                    label="System"
+                                />
+                            </nav>
+                        </div>
+
+                        <div className="mt-auto p-4 border-t border-zinc-200">
+                            <NavItem icon={<Settings size={20} />} label="Settings" />
+                        </div>
+                    </aside>
+
+                    {/* Main Content Area */}
+                    <main className="flex-1 flex flex-col overflow-hidden bg-white">
+                        {/* Top Bar - Light */}
+                        <header className="h-16 flex items-center justify-between px-8 border-b border-zinc-200 bg-white">
+                            <h2 className="text-xl font-semibold text-zinc-900 tracking-tight">
+                                {getTitle()}
+                            </h2>
+                            <div className="flex items-center space-x-4">
+                                <button className="p-2 hover:bg-zinc-100 rounded-md text-zinc-500 hover:text-zinc-900 transition-colors">
+                                    <Menu size={20} />
+                                </button>
+                            </div>
+                        </header>
+
+                        {/* Scrollable Content */}
+                        <div className="flex-1 overflow-auto p-8">
+                            <div className="max-w-6xl mx-auto pb-12">
+                                {renderContent()}
+                            </div>
+                        </div>
+                    </main>
+                </div>
+                );
+}
+
+                function NavItem({active, onClick, icon, label, badge}: any) {
+    return (
+                <button
+                    onClick={onClick}
+                    className={`w-full flex items-center px-3 py-2 rounded-md transition-colors duration-200 group relative ${active
+                        ? 'bg-zinc-100 text-zinc-900 font-medium'
+                        : 'text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900'
+                        }`}
+                >
+                    <div className="flex items-center space-x-3">
+                        <span className={`${active ? 'text-indigo-600' : 'text-zinc-400 group-hover:text-zinc-600'}`}>
+                            {icon}
+                        </span>
+                        <span className="text-sm">{label}</span>
+                    </div>
+                    {badge && (
+                        <span className={`ml-auto px-1.5 py-0.5 rounded text-[10px] font-bold ${active ? 'bg-indigo-600 text-white' : 'bg-zinc-100 text-zinc-500 border border-zinc-200'}`}>
+                            {badge}
+                        </span>
+                    )}
+                </button>
+                );
+}
+
+                export default App;

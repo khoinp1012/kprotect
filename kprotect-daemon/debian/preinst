@@ -1,0 +1,33 @@
+#!/bin/bash
+# preinst script for kprotect
+
+set -e
+
+if [ "$1" = "install" ] || [ "$1" = "upgrade" ]; then
+    # Check if LSM BPF is enabled
+    if ! grep -q "bpf" /sys/kernel/security/lsm 2>/dev/null; then
+        echo "LSM BPF is not enabled. kprotect requires it to function."
+        read -p "Would you like to generate the GRUB update command? [y/N]: " response < /dev/tty > /dev/tty
+        
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+            # Extract current GRUB parameters
+            CURRENT_PARAMS=$(grep "^GRUB_CMDLINE_LINUX_DEFAULT=" /etc/default/grub | sed 's/GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/\1/')
+            
+            # Refine parameters: remove existing lsm= and append new one at the end
+            NEW_PARAMS=$(echo "$CURRENT_PARAMS" | sed 's/lsm=[^ "]*//')
+            NEW_PARAMS="$NEW_PARAMS lsm=lockdown,capability,landlock,yama,apparmor,bpf"
+            
+            # Clean up double spaces and leading/trailing whitespace
+            NEW_PARAMS=$(echo "$NEW_PARAMS" | sed 's/  */ /g' | sed 's/^ //;s/ $//')
+
+            echo ""
+            echo "Run this command and then RESTART YOUR COMPUTER:"
+            echo "--------------------------------------------------------------------------------"
+            echo "sudo sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\".*\"/GRUB_CMDLINE_LINUX_DEFAULT=\"$NEW_PARAMS\"/' /etc/default/grub && sudo update-grub"
+            echo "--------------------------------------------------------------------------------"
+            echo ""
+        fi
+    fi
+fi
+
+#DEBHELPER#

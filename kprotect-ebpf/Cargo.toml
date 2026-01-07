@@ -1,0 +1,25 @@
+[package]
+name = "kprotect-ebpf"
+version = "0.1.0-beta"
+edition = "2021"
+authors = ["khoinp1012"]
+license = "GPL-2.0"
+autobins = false
+
+# This is a standalone package, not part of the workspace
+[workspace]
+
+[lib]
+name = "kprotect_ebpf"
+path = "src/main.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+aya-ebpf = "0.1"
+
+[build-dependencies]
+
+[profile.release]
+panic = "abort"
+opt-level = 3
+lto = true

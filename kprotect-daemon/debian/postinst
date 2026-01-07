@@ -1,0 +1,29 @@
+#!/bin/bash
+# postinst script for kprotect
+
+set -e
+
+if [ "$1" = "configure" ]; then
+    # Create required directories
+    mkdir -p /var/lib/kprotect/configs
+    mkdir -p /run/kprotect
+    
+    # Set permissions
+    chmod 700 /var/lib/kprotect/configs
+    chmod 755 /run/kprotect  # Allow GUI to access socket
+    
+    # Reload systemd to pick up new unit file
+    systemctl daemon-reload || true
+    
+    # Enable and start/restart the service
+    systemctl enable kprotect || true
+    systemctl restart kprotect || true
+
+    echo ""
+    echo "================================================================================"
+    echo " IMPORTANT: Please RESTART YOUR COMPUTER before authorizing any chain."
+    echo " This ensures kprotect correctly tracks process lineage from boot."
+    echo "================================================================================"
+fi
+
+#DEBHELPER#

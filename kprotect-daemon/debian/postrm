@@ -1,0 +1,31 @@
+#!/bin/bash
+# postrm script for kprotect
+
+set -e
+
+case "$1" in
+    purge)
+        # Remove ALL data on purge (apt purge kprotect)
+        rm -rf /var/lib/kprotect
+        rm -rf /etc/kprotect
+        rm -rf /run/kprotect
+        rm -rf /var/log/kprotect
+        echo "kprotect: All configuration and data files removed."
+        ;;
+    remove)
+        # On remove (apt remove kprotect), keep configs but clean runtime
+        rm -rf /run/kprotect
+        # Preserve /var/lib/kprotect for potential reinstall
+        echo "kprotect: Configuration preserved in /var/lib/kprotect"
+        echo "kprotect: To completely remove, run: sudo apt purge kprotect"
+        ;;
+    upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        # Don't remove anything during upgrade
+        ;;
+    *)
+        echo "postrm called with unknown argument: $1" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
