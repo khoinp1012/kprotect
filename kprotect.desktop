@@ -1,9 +1,0 @@
-[Desktop Entry]
-Name=kprotect
-Exec=/home/khoi/Documents/kprotect/kprotect-ui/src-tauri/target/release/bundle/appimage/kprotect-ui_0.1.0-beta_amd64.AppImage
-Icon=/home/khoi/Documents/kprotect/kprotect-ui/src-tauri/icons/icon.png
-StartupWMClass=kprotect-ui
-Type=Application
-Categories=Security;System;
-Comment=eBPF-based process lineage security
-Terminal=false
