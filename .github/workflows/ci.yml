@@ -1,0 +1,48 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build_rust:
+    name: Build & Test (Rust)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install LLVM (for eBPF)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm clang libelf-dev
+
+      - name: Cache Cargo Dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Check Formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (Lints)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Build Core
+        run: cargo build --verbose
+
+      - name: Run Units Tests
+        run: cargo test --verbose

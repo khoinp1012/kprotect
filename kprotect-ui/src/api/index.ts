@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { AuthorizedPattern, ZonesConfig, Capabilities, Event, LogConfig, AuditLog } from '../types';
+import { AuthorizedPattern, ZonesConfig, Capabilities, Event, LogConfig, AuditLog, SudoRule } from '../types';
 
 export const api = {
     // Patterns / Allowlist
@@ -43,6 +43,11 @@ export const api = {
     addNotificationRule: (rule: any) => invoke('add_notification_rule', rule),
     removeNotificationRule: (id: number) => invoke('remove_notification_rule', { id }),
     toggleNotificationRule: (id: number, enabled: boolean) => invoke('toggle_notification_rule', { id, enabled }),
+
+    // Sudo Rules (Privilege Guard)
+    getSudoRules: () => invoke<SudoRule[]>('get_sudo_rules'),
+    addSudoRule: (pattern: string[], description: string) => invoke('add_sudo_rule', { pattern, description }),
+    removeSudoRule: (pattern: string[]) => invoke('remove_sudo_rule', { pattern }),
 
     // Resource Usage
     getResourceUsage: () => invoke<SystemStats>('get_resource_usage'),

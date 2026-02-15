@@ -1,8 +1,8 @@
 use anyhow::{anyhow, bail, Context, Result};
 use kprotect_common::{BridgeEvent, LogEntry};
-use serde::{Deserialize, Serialize};
+use serde_json;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Write, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -68,6 +68,7 @@ impl EncryptedLogger {
         chain: Vec<String>,
         authorized: bool,
         complete: bool,
+        label_snapshot: Vec<String>,
     ) -> Result<()> {
         let entry = LogEntry::SecurityEvent {
             id: event_id,
@@ -92,6 +93,7 @@ impl EncryptedLogger {
             signature: format!("0x{:x}", event.signature),
             authorized,
             complete,
+            label_snapshot,
         };
 
         let mut file = self.events_file.lock().unwrap();
@@ -118,6 +120,20 @@ impl EncryptedLogger {
 
         let mut file = self.audit_file.lock().unwrap();
         self.write_encrypted_line(&mut file, &entry)
+    }
+
+    /// Generic log entry writer (exposed for Sudo events)
+    pub fn log_entry(&self, entry: &LogEntry) -> Result<()> {
+        match entry {
+            LogEntry::SecurityEvent { .. } => {
+                let mut file = self.events_file.lock().unwrap();
+                self.write_encrypted_line(&mut file, entry)
+            },
+            LogEntry::AuditAction { .. } => {
+                let mut file = self.audit_file.lock().unwrap();
+                self.write_encrypted_line(&mut file, entry)
+            }
+        }
     }
 
     /// Read security events with pagination
@@ -243,6 +259,8 @@ impl EncryptedLogger {
         for line in lines.iter().rev().skip(offset).take(count) {
             if let Ok(entry) = self.decrypt_line(line) {
                 entries.push(entry);
+            } else if let Err(e) = self.decrypt_line(line) {
+                log::warn!("Failed to read log line: {}", e);
             }
         }
 

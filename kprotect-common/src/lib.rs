@@ -72,6 +72,19 @@ pub struct AuthorizedPattern {
     pub authorized_at: u64,
 }
 
+/// Dedicated struct for Privilege Guard (Sudo Bypass)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SudoRule {
+    /// The exact process lineage allowed to bypass sudo
+    pub pattern: Vec<String>,
+    /// Human-readable explanation for why this elevation is allowed
+    pub description: String,
+    /// Unix timestamp when this rule was added
+    pub created_at: u64,
+    /// Whether this rule is currently active
+    pub enabled: bool,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MatchMode {
     /// Full chain must match exactly
@@ -117,6 +130,8 @@ pub struct NotificationRule {
 pub enum EventTypeFilter {
     Verified,
     Blocked,
+    SudoVerified,
+    SudoBlocked,
 }
 
 /// Action type for notifications
@@ -193,6 +208,7 @@ pub enum LogEntry {
         signature: String,
         authorized: bool,
         complete: bool,
+        label_snapshot: Vec<String>,
     },
     AuditAction {
         timestamp: u64,

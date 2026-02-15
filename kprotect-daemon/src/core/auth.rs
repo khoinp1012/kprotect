@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use kprotect_common::{AuthorizedPattern, MatchMode};
 use log::info;
-use anyhow::{Result, Context, bail};
+use anyhow::{Result, bail};
 use aya::maps::lpm_trie::{LpmTrie, Key};
 use aya::maps::MapData;
 
@@ -168,21 +168,17 @@ pub fn rebuild_auth_caches(authorized_patterns: &[AuthorizedPattern], exact_cach
 }
 
 /// Check if a process chain matches any authorized pattern
-pub fn is_chain_authorized(chain: &[String], exact_cache: &HashMap<Vec<String>, AuthorizedPattern>, suffix_cache: &ChainTrieNode) -> bool {
+pub fn is_chain_authorized(chain: &[String], exact_cache: &HashMap<Vec<String>, AuthorizedPattern>, suffix_cache: &ChainTrieNode) -> Option<AuthorizedPattern> {
     // 1. O(1) Exact Match lookup
     if let Some(pattern) = exact_cache.get(chain) {
         info!("✅ Chain matched Exact pattern: {:?} (description: {:?})", 
               pattern.pattern, pattern.description);
-        return true;
+        return Some(pattern.clone());
     }
 
     // 2. O(m) Suffix Match lookup using reversed Trie
     let mut reversed_chain = chain.to_vec();
     reversed_chain.reverse();
-    
-    // We need to check all possible lengths for the suffix in the Trie
-    // Actually, the Trie traversal should find the longest prefix of the reversed chain
-    // that is marked as terminal.
     
     let mut current = suffix_cache;
     for part in reversed_chain {
@@ -192,7 +188,7 @@ pub fn is_chain_authorized(chain: &[String], exact_cache: &HashMap<Vec<String>, 
                 if let Some(pattern) = &current.pattern {
                     info!("✅ Chain matched Suffix pattern: {:?} (description: {:?})", 
                           pattern.pattern, pattern.description);
-                    return true;
+                    return Some(pattern.clone());
                 }
             }
         } else {
@@ -200,5 +196,5 @@ pub fn is_chain_authorized(chain: &[String], exact_cache: &HashMap<Vec<String>, 
         }
     }
 
-    false
+    None
 }

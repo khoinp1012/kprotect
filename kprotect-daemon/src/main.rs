@@ -23,22 +23,17 @@
 //! - AES-256-GCM encrypted configuration
 //! - Protocol v1.0 compliant
 
-pub mod crypto;
-pub mod migration;
-pub mod config;
-pub mod logger;
-pub mod notifications;
-pub mod state;
-pub mod core;
-pub mod ebpf;
-pub mod server;
+use kprotect_daemon::server::startup;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use tokio::net::UnixStream;
 use tokio::io::AsyncWriteExt;
 
-const SOCKET_PATH: &str = "/var/run/kprotect.sock";
+#[cfg(not(debug_assertions))]
+const SOCKET_PATH: &str = "/run/kprotect/kprotect.sock";
+#[cfg(debug_assertions)]
+const SOCKET_PATH: &str = "/tmp/kprotect.sock";
 
 #[derive(Parser)]
 #[command(name = "kprotect")]
@@ -68,7 +63,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Daemon => {
-            crate::server::startup::start_daemon().await?;
+            startup::start_daemon().await?;
         }
         Commands::Authorize { signature } => {
             // CLI client mode: send command to socket

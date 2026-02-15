@@ -44,7 +44,12 @@ use kprotect_client::KprotectClient;
 #[command(version)]
 struct Cli {
     /// Path to kprotect daemon socket
+    #[cfg(not(debug_assertions))]
     #[arg(long, default_value = "/run/kprotect/kprotect.sock")]
+    socket: String,
+
+    #[cfg(debug_assertions)]
+    #[arg(long, default_value = "/tmp/kprotect.sock")]
     socket: String,
 
     #[command(subcommand)]
@@ -130,6 +135,46 @@ enum Commands {
 
     /// Start interactive mode (reads commands from stdin)
     Interactive,
+
+    /// Manage sudo privilege rules
+    Sudo {
+        #[command(subcommand)]
+        action: SudoAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum SudoAction {
+    /// Add a sudo rule
+    Add {
+        /// Comma-separated process lineage (e.g. "/usr/bin/bash,/usr/bin/cat")
+        #[arg(short, long)]
+        pattern: String,
+        
+        /// Description of the rule
+        #[arg(short, long)]
+        description: String,
+    },
+    /// List all sudo rules
+    List {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove a sudo rule
+    Remove {
+        /// Comma-separated process lineage to remove
+        #[arg(short, long)]
+        pattern: String,
+    },
+    /// Check if a sudo command would be allowed (Simulation)
+    Check {
+        /// PID of the process requesting sudo
+        pid: u32,
+        /// Command being executed
+        #[arg(required = false)]
+        cmd: Option<String>,
+    },
 }
 
 
@@ -625,6 +670,8 @@ async fn main() -> Result<()> {
                         .map(|s| match s.trim() {
                             "Verified" => kprotect_common::EventTypeFilter::Verified,
                             "Blocked" => kprotect_common::EventTypeFilter::Blocked,
+                            "SudoVerified" => kprotect_common::EventTypeFilter::SudoVerified,
+                            "SudoBlocked" => kprotect_common::EventTypeFilter::SudoBlocked,
                             _ => panic!("Invalid event type: {}", s),
                         })
                         .collect();
@@ -693,7 +740,7 @@ async fn main() -> Result<()> {
                                         0.0
                                     };
                                     
-                                    let rate_color = if success_rate >= 95.0 {
+                                    let _rate_color = if success_rate >= 95.0 {
                                         success_rate.to_string().green()
                                     } else if success_rate >= 80.0 {
                                         success_rate.to_string().yellow()
@@ -1003,6 +1050,8 @@ async fn main() -> Result<()> {
                             .map(|s| match s.trim() {
                                 "Verified" => kprotect_common::EventTypeFilter::Verified,
                                 "Blocked" => kprotect_common::EventTypeFilter::Blocked,
+                                "SudoVerified" => kprotect_common::EventTypeFilter::SudoVerified,
+                                "SudoBlocked" => kprotect_common::EventTypeFilter::SudoBlocked,
                                 _ => kprotect_common::EventTypeFilter::Blocked,
                             })
                             .collect();
@@ -1065,8 +1114,113 @@ async fn main() -> Result<()> {
                             Err(e) => println!("{{\"status\": \"error\", \"message\": \"{}\"}}", e),
                         }
                     }
+                    "SUDO_ADD" => {
+                        if parts.len() < 3 {
+                            println!("{{\"error\": \"usage: SUDO_ADD;pattern;description\"}}");
+                            continue;
+                        }
+                        let pattern_str = parts[1];
+                        let description = parts[2];
+                        let pattern_list: Vec<String> = pattern_str.split(',')
+                            .map(|s| s.trim().to_string())
+                            .collect();
+                        
+                        match client.add_sudo_rule(&pattern_list, description).await {
+                             Ok(_) => println!("{{\"status\": \"ok\", \"action\": \"SUDO_ADD\", \"description\": \"{}\"}}", description),
+                             Err(e) => println!("{{\"status\": \"error\", \"message\": \"{}\"}}", e),
+                        }
+                    }
+                    "SUDO_LIST" => {
+                        match client.list_sudo_rules().await {
+                            Ok(rules) => {
+                                match serde_json::to_string(&rules) {
+                                    Ok(json) => println!("{}", json),
+                                    Err(e) => println!("{{\"status\": \"error\", \"message\": \"Failed to serialize sudo rules: {}\"}}", e),
+                                }
+                            }
+                            Err(e) => println!("{{\"status\": \"error\", \"message\": \"{}\"}}", e),
+                        }
+                    }
+                    "SUDO_REMOVE" => {
+                        if parts.len() < 2 {
+                            println!("{{\"error\": \"usage: SUDO_REMOVE;pattern\"}}");
+                            continue;
+                        }
+                        let pattern_str = parts[1];
+                        let pattern_list: Vec<String> = pattern_str.split(',')
+                            .map(|s| s.trim().to_string())
+                            .collect();
+                        
+                        match client.remove_sudo_rule(&pattern_list).await {
+                             Ok(_) => println!("{{\"status\": \"ok\", \"action\": \"SUDO_REMOVE\", \"pattern\": \"{}\"}}", pattern_str),
+                             Err(e) => println!("{{\"status\": \"error\", \"message\": \"{}\"}}", e),
+                        }
+                    }
+                    "SUDO_CHECK" => {
+                        if parts.len() < 2 {
+                            println!("{{\"error\": \"usage: SUDO_CHECK;pid;[cmd]\"}}");
+                            continue;
+                        }
+                        let pid = parts[1].trim().parse::<u32>().unwrap_or(0);
+                        let cmd = parts.get(2).map(|s| s.to_string());
+                        
+                        match client.check_sudo(pid, cmd.as_deref()).await {
+                             Ok(allowed) => println!("{{\"status\": \"ok\", \"action\": \"SUDO_CHECK\", \"allowed\": {}}}", allowed),
+                             Err(e) => println!("{{\"status\": \"error\", \"message\": \"{}\"}}", e),
+                        }
+                    }
                     "exit" | "quit" => break,
                     _ => println!("{{\"status\": \"error\", \"message\": \"unknown command\"}}"),
+                }
+            }
+        }
+
+        Commands::Sudo { action } => {
+            match action {
+                SudoAction::Add { pattern, description } => {
+                    let pattern_list: Vec<String> = pattern.split(',')
+                        .map(|s| s.trim().to_string())
+                        .collect();
+                    
+                    client.add_sudo_rule(&pattern_list, &description).await?;
+                    println!("{} Added sudo rule: {}", "✓".green().bold(), description.cyan());
+                    println!("   {} {}", "Lineage:".dimmed(), pattern.yellow());
+                }
+                SudoAction::List { json } => {
+                    let rules = client.list_sudo_rules().await?;
+                    
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&rules)?);
+                    } else if rules.is_empty() {
+                        println!("\n{} {}", "ℹ".blue(), "No sudo rules defined".dimmed());
+                    } else {
+                        println!("\n{} Sudo Rules:", "🔑".bold());
+                        for (idx, rule) in rules.iter().enumerate() {
+                            println!("\n  {} Rule #{}", "→".cyan(), idx + 1);
+                            println!("    {} {}", "Chain:".dimmed(), rule.pattern.join(" → ").yellow());
+                            println!("    {} {}", "Desc:".dimmed(), rule.description.cyan());
+                            println!("    {} {}", "Status:".dimmed(), if rule.enabled { "Active".green() } else { "Disabled".red() });
+                        }
+                        println!();
+                    }
+                }
+                SudoAction::Remove { pattern } => {
+                    let pattern_list: Vec<String> = pattern.split(',')
+                        .map(|s| s.trim().to_string())
+                        .collect();
+                    
+                    match client.remove_sudo_rule(&pattern_list).await {
+                        Ok(_) => println!("{} Removed sudo rule: {}", "✓".green().bold(), pattern.yellow()),
+                        Err(e) => println!("{} Failed to remove rule: {}", "✗".red().bold(), e),
+                    }
+                }
+                SudoAction::Check { pid, cmd } => {
+                    let allowed = client.check_sudo(pid, cmd.as_deref()).await?;
+                    if allowed {
+                        println!("{} {}", "✓".green().bold(), "ALLOWED: Sudo would be permitted".green());
+                    } else {
+                        println!("{} {}", "✗".red().bold(), "DENIED: Sudo would be blocked".red());
+                    }
                 }
             }
         }

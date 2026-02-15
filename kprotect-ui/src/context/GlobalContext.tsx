@@ -14,7 +14,9 @@ interface GlobalState {
     allowlist: AuthorizedPattern[];
     refreshAllowlist: () => void;
     checkRootStatus: () => Promise<void>;
+    elevationEvents: Event[];
     clearEvents: () => void;
+    clearElevationEvents: () => void;
     loadMoreEvents: () => Promise<void>;
     loadMoreAuditLogs: () => Promise<void>;
     refreshAuditLogs: () => Promise<void>;
@@ -22,21 +24,27 @@ interface GlobalState {
     setBlockedAlertsEnabled: (enabled: boolean) => void;
     authorizedAlertsEnabled: boolean;
     setAuthorizedAlertsEnabled: (enabled: boolean) => void;
+    sudoBlockedAlertsEnabled: boolean;
+    setSudoBlockedAlertsEnabled: (enabled: boolean) => void;
+    sudoAuthorizedAlertsEnabled: boolean;
+    setSudoAuthorizedAlertsEnabled: (enabled: boolean) => void;
     compressionEnabled: boolean;
     setCompressionEnabled: (enabled: boolean) => void;
 }
 
-const GlobalContext = createContext<GlobalState | undefined>(undefined);
+export const GlobalContext = createContext<GlobalState | undefined>(undefined);
 
 // Utility Helpers (Pure functions outside to avoid stale closures/hoisting issues)
 const mapRawEventToUI = (raw: any): Event => {
     const statusStr = (raw.status || "").trim();
-    let status: 'Verified' | 'Blocked' | 'Birth' | 'Exit' | 'Unknown' = 'Unknown';
+    let status: 'Verified' | 'Blocked' | 'Birth' | 'Exit' | 'Elevation' | 'Blocked Elevation' | 'Unknown' = 'Unknown';
 
     if (statusStr === 'Verified') status = 'Verified';
     else if (statusStr === 'Blocked') status = 'Blocked';
     else if (statusStr === 'Birth') status = 'Birth';
     else if (statusStr === 'Exit') status = 'Exit';
+    else if (statusStr === 'Elevation') status = 'Elevation';
+    else if (statusStr === 'Blocked Elevation') status = 'Blocked Elevation';
     else {
         console.error(`Unknown event status received: "${statusStr}"`, raw);
     }
@@ -98,6 +106,7 @@ const recompressGroups = (groups: Event[]): Event[] => {
 export function GlobalProvider({ children }: { children: ReactNode }) {
     const [events, setEvents] = useState<Event[]>([]);
     const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+    const [elevationEvents, setElevationEvents] = useState<Event[]>([]);
     const processedEventIds = useRef<Set<number | string>>(new Set());
     const [allowlistCount, setAllowlistCount] = useState(0);
     const [isRootActive, setIsRootActive] = useState(false);
@@ -112,6 +121,14 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
         const saved = localStorage.getItem('authorizedAlertsEnabled');
         return saved !== null ? saved === 'true' : false;
     });
+    const [sudoBlockedAlertsEnabled, _setSudoBlockedAlertsEnabled] = useState(() => {
+        const saved = localStorage.getItem('sudoBlockedAlertsEnabled');
+        return saved !== null ? saved === 'true' : true;
+    });
+    const [sudoAuthorizedAlertsEnabled, _setSudoAuthorizedAlertsEnabled] = useState(() => {
+        const saved = localStorage.getItem('sudoAuthorizedAlertsEnabled');
+        return saved !== null ? saved === 'true' : true;
+    });
     const [compressionEnabled, _setCompressionEnabled] = useState(() => {
         const saved = localStorage.getItem('compressionEnabled');
         return saved !== null ? saved === 'true' : true;
@@ -119,6 +136,8 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
 
     const blockedAlertsEnabledRef = useRef(blockedAlertsEnabled);
     const authorizedAlertsEnabledRef = useRef(authorizedAlertsEnabled);
+    const sudoBlockedAlertsEnabledRef = useRef(sudoBlockedAlertsEnabled);
+    const sudoAuthorizedAlertsEnabledRef = useRef(sudoAuthorizedAlertsEnabled);
     const compressionEnabledRef = useRef(compressionEnabled);
 
     const setBlockedAlertsEnabled = (enabled: boolean) => {
@@ -131,6 +150,18 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
         _setAuthorizedAlertsEnabled(enabled);
         authorizedAlertsEnabledRef.current = enabled;
         localStorage.setItem('authorizedAlertsEnabled', enabled.toString());
+    };
+
+    const setSudoBlockedAlertsEnabled = (enabled: boolean) => {
+        _setSudoBlockedAlertsEnabled(enabled);
+        sudoBlockedAlertsEnabledRef.current = enabled;
+        localStorage.setItem('sudoBlockedAlertsEnabled', enabled.toString());
+    };
+
+    const setSudoAuthorizedAlertsEnabled = (enabled: boolean) => {
+        _setSudoAuthorizedAlertsEnabled(enabled);
+        sudoAuthorizedAlertsEnabledRef.current = enabled;
+        localStorage.setItem('sudoAuthorizedAlertsEnabled', enabled.toString());
     };
 
     const setCompressionEnabled = (enabled: boolean) => {
@@ -146,10 +177,13 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
     useEffect(() => {
         blockedAlertsEnabledRef.current = blockedAlertsEnabled;
         authorizedAlertsEnabledRef.current = authorizedAlertsEnabled;
+        sudoBlockedAlertsEnabledRef.current = sudoBlockedAlertsEnabled;
+        sudoAuthorizedAlertsEnabledRef.current = sudoAuthorizedAlertsEnabled;
         compressionEnabledRef.current = compressionEnabled;
-    }, [blockedAlertsEnabled, authorizedAlertsEnabled, compressionEnabled]);
+    }, [blockedAlertsEnabled, authorizedAlertsEnabled, sudoBlockedAlertsEnabled, sudoAuthorizedAlertsEnabled, compressionEnabled]);
 
     const eventBuffer = useRef<Event[]>([]);
+    const elevationBuffer = useRef<Event[]>([]);
     const rawEventCount = useRef<number>(0);
 
     // Recompress state when toggle changes
@@ -176,7 +210,7 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
                         rawEventCount.current = rawEvents.length;
                         const mapped = rawEvents
                             .map(mapRawEventToUI)
-                            .filter(e => e.status !== 'Birth');
+                            .filter(e => e.status !== 'Birth' && e.status !== 'Elevation' && e.status !== 'Blocked Elevation');
 
                         console.log('[CompressionEffect] Loaded raw events:', mapped.length);
                         setEvents(mapped);
@@ -217,6 +251,10 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
         rawEventCount.current = 0;
     };
 
+    const clearElevationEvents = () => {
+        setElevationEvents([]);
+    };
+
     const checkNotificationPermission = async () => {
         let permission = await isPermissionGranted();
         if (!permission) {
@@ -237,13 +275,18 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
                 processedEventIds.current.add(newEvent.id);
 
                 const shouldNotify = (newEvent.status === 'Blocked' && blockedAlertsEnabledRef.current) ||
-                    (newEvent.status === 'Verified' && authorizedAlertsEnabledRef.current);
+                    (newEvent.status === 'Verified' && authorizedAlertsEnabledRef.current) ||
+                    (newEvent.status === 'Blocked Elevation' && sudoBlockedAlertsEnabledRef.current) ||
+                    (newEvent.status === 'Elevation' && sudoAuthorizedAlertsEnabledRef.current);
 
                 if (shouldNotify) {
                     try {
+                        const isSudo = newEvent.status.includes('Elevation');
                         await sendNotification({
-                            title: `Security Alert: ${newEvent.status}`,
-                            body: `Process ${newEvent.pid} was ${newEvent.status.toLowerCase()} from accessing ${newEvent.path}.`,
+                            title: isSudo ? `Sudo Alert: ${newEvent.status}` : `Security Alert: ${newEvent.status}`,
+                            body: isSudo
+                                ? `Process ${newEvent.pid} ${newEvent.status.toLowerCase()} access to Sudo.`
+                                : `Process ${newEvent.pid} was ${newEvent.status.toLowerCase()} from accessing ${newEvent.path}.`,
                         });
                     } catch (error) {
                         console.error('[Notification] Failed:', error);
@@ -257,8 +300,27 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
                     });
                 }
 
+                if (newEvent.status === 'Blocked Elevation' && sudoBlockedAlertsEnabledRef.current) {
+                    toast.error(`Sudo Blocked`, {
+                        description: `Elevation request denied for PID ${newEvent.pid}`,
+                        duration: 5000,
+                    });
+                }
+
+                if (newEvent.status === 'Elevation' && sudoAuthorizedAlertsEnabledRef.current) {
+                    toast.success(`Sudo Verified`, {
+                        description: `Elevation request granted for PID ${newEvent.pid}`,
+                        duration: 3000,
+                    });
+                }
+
                 if (newEvent.status === 'Birth') return;
-                eventBuffer.current.push(newEvent);
+
+                if (newEvent.status === 'Elevation' || newEvent.status === 'Blocked Elevation') {
+                    elevationBuffer.current.push(newEvent);
+                } else {
+                    eventBuffer.current.push(newEvent);
+                }
             });
             return unlisten;
         } catch (e) {
@@ -274,14 +336,17 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
 
             if (Array.isArray(rawEvents)) {
                 rawEventCount.current = rawEvents.length;
-                const mapped = rawEvents
-                    .map(mapRawEventToUI)
-                    .filter(e => e.status !== 'Birth');
+                const allMapped = rawEvents.map(mapRawEventToUI);
+
+                const fileMapped = allMapped.filter(e => e.status !== 'Birth' && e.status !== 'Elevation' && e.status !== 'Blocked Elevation');
+                const sudoMapped = allMapped.filter(e => e.status === 'Elevation' || e.status === 'Blocked Elevation');
+
+                setElevationEvents(sudoMapped.slice(0, 500));
 
                 if (!compressionEnabledRef.current) {
-                    setEvents(mapped);
+                    setEvents(fileMapped);
                 } else {
-                    setEvents(recompressGroups(compressEvents(mapped)));
+                    setEvents(recompressGroups(compressEvents(fileMapped)));
                 }
             }
 
@@ -303,7 +368,7 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
             if (Array.isArray(rawEvents)) {
                 const mapped = rawEvents
                     .map(mapRawEventToUI)
-                    .filter(e => e.status !== 'Birth');
+                    .filter(e => e.status !== 'Birth' && e.status !== 'Elevation' && e.status !== 'Blocked Elevation');
                 rawEventCount.current += rawEvents.length;
 
                 setEvents(prev => {
@@ -383,12 +448,18 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
                 eventBuffer.current = [];
 
                 setEvents(prev => {
-                    const mapped = batch.filter(e => e.status !== 'Birth');
+                    const mapped = batch.filter(e => e.status !== 'Birth' && e.status !== 'Elevation' && e.status !== 'Blocked Elevation');
                     if (!compressionEnabledRef.current) return [...mapped, ...prev].slice(0, 1000);
 
                     const compressedBatch = compressEvents(mapped);
                     return recompressGroups([...compressedBatch, ...prev]).slice(0, 1000);
                 });
+            }
+
+            if (elevationBuffer.current.length > 0) {
+                const batch = [...elevationBuffer.current];
+                elevationBuffer.current = [];
+                setElevationEvents(prev => [...batch, ...prev].slice(0, 500));
             }
         }, 500);
 
@@ -410,6 +481,7 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
     return (
         <GlobalContext.Provider value={{
             events,
+            elevationEvents,
             auditLogs,
             allowlistCount,
             isRootActive,
@@ -417,6 +489,7 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
             refreshAllowlist,
             checkRootStatus,
             clearEvents,
+            clearElevationEvents,
             loadMoreEvents,
             loadMoreAuditLogs,
             refreshAuditLogs,
@@ -424,6 +497,10 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
             setBlockedAlertsEnabled,
             authorizedAlertsEnabled,
             setAuthorizedAlertsEnabled,
+            sudoBlockedAlertsEnabled,
+            setSudoBlockedAlertsEnabled,
+            sudoAuthorizedAlertsEnabled,
+            setSudoAuthorizedAlertsEnabled,
             compressionEnabled,
             setCompressionEnabled,
             allowlist

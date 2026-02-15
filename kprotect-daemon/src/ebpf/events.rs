@@ -1,4 +1,4 @@
-use anyhow::{Result, Context};
+use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use aya::maps::{Map, MapData, HashMap as BpfHashMap};
@@ -56,7 +56,7 @@ pub async fn monitor_ebpf_events(map: Map, state: Arc<Mutex<AppState>>, auth_map
     Ok(())
 }
 
-async fn process_event(event: BridgeEvent, state: &Arc<Mutex<AppState>>, auth_map: &Arc<Mutex<BpfHashMap<MapData, u64, u8>>>, sig_map: &Arc<Mutex<BpfHashMap<MapData, u32, u64>>>) -> Result<()> {
+async fn process_event(event: BridgeEvent, state: &Arc<Mutex<AppState>>, auth_map: &Arc<Mutex<BpfHashMap<MapData, u64, u8>>>, _sig_map: &Arc<Mutex<BpfHashMap<MapData, u32, u64>>>) -> Result<()> {
     let comm = bytes_to_string(&event.comm);
     let path = bytes_to_string(&event.path);
     
@@ -64,57 +64,51 @@ async fn process_event(event: BridgeEvent, state: &Arc<Mutex<AppState>>, auth_ma
     if event.event_type == 3 {
         let enriched_arg = parse_enriched_args(&event.arg, event.argc);
         
-        // BIRTH logging disabled for production (can be re-enabled for debugging)
-        // println!("BIRTH pid={} ppid={} signature: 0x{:x} path={}", 
-        //          event.pid, event.ppid, event.signature, path);
-        
-        let mut state_lock = state.lock().await;
-        
+        let lineage_cache = {
+            let state_lock = state.lock().await;
+            state_lock.lineage_cache.clone()
+        };
+
         // PID REUSE DETECTION: If PID exists but start_time is different, clean up the old process first
-        if let Some(old_node) = state_lock.lineage_cache.get(&event.pid) {
+        if let Some(old_node) = lineage_cache.get(&event.pid) {
             if old_node.start_time != event.start_time {
                 let old_ppid = old_node.ppid;
-                state_lock.lineage_cache.remove(&event.pid);
-                cleanup_parent_chain(&mut state_lock.lineage_cache, old_ppid);
+                drop(old_node); // Release DashMap read lock
+                lineage_cache.remove(&event.pid);
+                cleanup_parent_chain(&lineage_cache, old_ppid);
             }
         }
 
         // Insert new process with reference counting fields
-        state_lock.lineage_cache.insert(event.pid, LineageNode {
+        lineage_cache.insert(event.pid, LineageNode {
             path: if path.is_empty() { comm.clone() } else { path.clone() },
             arg: enriched_arg,
             ppid: event.ppid,
             start_time: event.start_time,
-            signature: event.signature, // Use kernel provided signature!
+            signature: event.signature,
             child_count: 0,
             is_exited: false,
         });
         
         // Increment parent's child count
-        if let Some(parent) = state_lock.lineage_cache.get_mut(&event.ppid) {
+        if let Some(mut parent) = lineage_cache.get_mut(&event.ppid) {
             parent.child_count += 1;
         }
         
-        // =================================================================================
-        // GOVERNOR LOGIC: Check if this new process matches any authorized pattern
-        // =================================================================================
+        // Build chain and check authorization
+        let (chain, _) = build_lineage_chain(event.pid, &comm, &path, &lineage_cache);
         
-        // 1. Build the chain for this new process
-        let (chain, _) = build_lineage_chain(event.pid, &comm, &path, &state_lock.lineage_cache);
-        
-        // 2. Check against authorized patterns
-        if is_chain_authorized(&chain, &state_lock.auth_exact_cache, &state_lock.auth_suffix_cache) {
-            info!("🛡️ Governor: Authorized PID {} ({}) due to pattern match!", event.pid, chain.join(" -> "));
+        let state_lock = state.lock().await;
+        if let Some(pattern) = is_chain_authorized(&chain, &state_lock.auth_exact_cache, &state_lock.auth_suffix_cache) {
+            info!("🛡️ Governor: Authorized PID {} ({}) due to pattern match: {}", 
+                  event.pid, chain.join(" -> "), pattern.description);
             
-            // 3. Update the Kernel Map (Allowlist)
             let mut auth_map_lock = auth_map.lock().await;
             if let Err(e) = auth_map_lock.insert(event.signature, 1, 0) {
                 error!("❌ Failed to update Kernel Map for PID {}: {}", event.pid, e);
             } else {
                 info!("✅ Kernel Map updated for signature 0x{:x}", event.signature);
             }
-        } else {
-            // debug!("Governor: PID {} does not match any pattern", event.pid);
         }
         
         return Ok(());
@@ -122,23 +116,23 @@ async fn process_event(event: BridgeEvent, state: &Arc<Mutex<AppState>>, auth_ma
     
     // Handle EXIT events (event_type == 4)
     if event.event_type == 4 {
-        let mut state_lock = state.lock().await;
+        let lineage_cache = {
+            let state_lock = state.lock().await;
+            state_lock.lineage_cache.clone()
+        };
         
         // Mark process as exited - ONLY if start_time matches
-        if let Some(node) = state_lock.lineage_cache.get_mut(&event.pid) {
+        if let Some(mut node) = lineage_cache.get_mut(&event.pid) {
             if node.start_time == event.start_time {
                 node.is_exited = true;
                 
                 // If no children, remove immediately and cascade up
                 if node.child_count == 0 {
                     let ppid = node.ppid;
-                    state_lock.lineage_cache.remove(&event.pid);
-                    
-                    // Cascade cleanup: decrement parent's child_count
-                    cleanup_parent_chain(&mut state_lock.lineage_cache, ppid);
+                    drop(node); // Release DashMap lock
+                    lineage_cache.remove(&event.pid);
+                    cleanup_parent_chain(&lineage_cache, ppid);
                 }
-            } else {
-                // debug!("Ignored EXIT for PID {} due to start_time mismatch (old process)", event.pid);
             }
         }
         
@@ -155,17 +149,30 @@ async fn process_event(event: BridgeEvent, state: &Arc<Mutex<AppState>>, auth_ma
     
     // Reconstruct chain
     let (chain, is_complete) = {
-        let state_lock = state.lock().await;
-        build_lineage_chain(event.pid, &comm, &path, &state_lock.lineage_cache)
+        let lineage_cache = {
+            let state_lock = state.lock().await;
+            state_lock.lineage_cache.clone()
+        };
+        build_lineage_chain(event.pid, &comm, &path, &lineage_cache)
     };
     
     // Completeness tracking removed - pattern-based auth doesn't need it
 
     let chain_str = chain.join(" -> ");
     
-    let is_authorized = {
-        let state_lock = state.lock().await;
-        is_chain_authorized(&chain, &state_lock.auth_exact_cache, &state_lock.auth_suffix_cache)
+    let (is_authorized, matched_pattern, event_sequence) = {
+        let mut state_lock = state.lock().await;
+        let matched_pattern = is_chain_authorized(&chain, &state_lock.auth_exact_cache, &state_lock.auth_suffix_cache);
+        let is_authorized = matched_pattern.is_some();
+        
+        state_lock.event_sequence += 1;
+        if is_authorized {
+            state_lock.events_verified += 1;
+        } else {
+            state_lock.events_blocked += 1;
+        }
+        
+        (is_authorized, matched_pattern, state_lock.event_sequence)
     };
     
     // Broadcast event with authorization status
@@ -184,21 +191,7 @@ async fn process_event(event: BridgeEvent, state: &Arc<Mutex<AppState>>, auth_ma
     let sig_hex = format!("0x{:x}", event.signature);
 
     // Increment event sequence and stats
-    let (event_id, current_key) = {
-        let mut state_lock = state.lock().await;
-        state_lock.event_sequence += 1;
-        
-        if is_authorized {
-            state_lock.events_verified += 1;
-        } else {
-            state_lock.events_blocked += 1;
-        }
-        
-        (state_lock.event_sequence, state_lock.encryption_key.clone())
-    };
-
-    // We no longer save state on every event to prevent disk I/O bottlenecks.
-    // The event sequence will be recovered from logs on startup.
+    let event_id = event_sequence;
 
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -233,6 +226,16 @@ async fn process_event(event: BridgeEvent, state: &Arc<Mutex<AppState>>, auth_ma
 
     // Log the security event (BLOCK or VERIFIED)
     if event.event_type == 1 || event.event_type == 2 {
+        let label_snapshot = if let Some(p) = matched_pattern {
+            let mut labels = chain.clone();
+            if !p.description.is_empty() {
+                labels.push(format!("Rule: {}", p.description));
+            }
+            labels
+        } else {
+            chain.clone()
+        };
+
         if let Err(e) = state_lock.logger.log_security_event(
             event_id,
             &event,
@@ -240,7 +243,8 @@ async fn process_event(event: BridgeEvent, state: &Arc<Mutex<AppState>>, auth_ma
             &path, // Use 'path' as 'target'
             chain.clone(),
             is_authorized,
-            is_complete
+            is_complete,
+            label_snapshot
         ) {
             warn!("Failed to log security event: {}", e);
         }

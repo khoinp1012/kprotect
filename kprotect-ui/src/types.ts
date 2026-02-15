@@ -2,7 +2,7 @@ export interface Event {
     id: number | string;
     timestamp: string;
     last_seen?: number | string; // For grouping validation
-    status: 'Verified' | 'Blocked' | 'Birth' | 'Exit' | 'Unknown';
+    status: 'Verified' | 'Blocked' | 'Birth' | 'Exit' | 'Elevation' | 'Blocked Elevation' | 'Unknown';
     pid: number;
     // signature is deprecated but might be present in old logs or transition
     // hash is also deprecated
@@ -52,7 +52,7 @@ export interface NotificationRule {
     id: number;
     name: string;
     enabled: boolean;
-    event_types: ('Verified' | 'Blocked')[];
+    event_types: ('Verified' | 'Blocked' | 'SudoVerified' | 'SudoBlocked')[];
     path_pattern: string | null;
     action_type: 'Script' | 'Webhook';
     destination: string;
@@ -77,4 +77,11 @@ export interface NotificationStats {
     success_rate: number;
     avg_execution_ms: number;
     last_triggered: number | null;
+}
+
+export interface SudoRule {
+    pattern: string[];
+    description: string;
+    created_at: number;
+    enabled: boolean;
 }

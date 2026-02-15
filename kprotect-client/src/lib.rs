@@ -37,8 +37,13 @@ pub struct KprotectClient {
 impl KprotectClient {
     /// Create a new client with default socket path
     pub fn new() -> Self {
+        #[cfg(debug_assertions)]
+        let path = "/tmp/kprotect.sock";
+        #[cfg(not(debug_assertions))]
+        let path = "/run/kprotect/kprotect.sock";
+
         Self {
-            socket_path: PathBuf::from("/run/kprotect/kprotect.sock"),
+            socket_path: PathBuf::from(path),
         }
     }
     
@@ -517,6 +522,8 @@ impl KprotectClient {
             .map(|et| match et {
                 kprotect_common::EventTypeFilter::Verified => "Verified",
                 kprotect_common::EventTypeFilter::Blocked => "Blocked",
+                kprotect_common::EventTypeFilter::SudoVerified => "SudoVerified",
+                kprotect_common::EventTypeFilter::SudoBlocked => "SudoBlocked",
             })
             .collect::<Vec<_>>()
             .join(",");
@@ -598,6 +605,62 @@ impl KprotectClient {
             .collect();
             
         Ok(stats)
+    }
+
+    // ============================================================================
+    // Privilege Guard (Sudo Rule) Management
+    // ============================================================================
+
+    /// Get all sudo rules
+    pub async fn list_sudo_rules(&self) -> Result<Vec<kprotect_common::SudoRule>> {
+        let response = self.send_command("SUDO_LIST").await?;
+        let json = self.parse_response(&response)?;
+        serde_json::from_str(&json).context("Failed to parse sudo rules")
+    }
+
+    /// Add a new sudo rule (Root only)
+    pub async fn add_sudo_rule(&self, pattern: &[String], description: &str) -> Result<()> {
+        let pattern_str = pattern.join(",");
+        let cmd = format!("SUDO_ADD;{};{}", pattern_str, description);
+        let response = self.send_command(&cmd).await?;
+        
+        if response.starts_with("OK") {
+            Ok(())
+        } else {
+            anyhow::bail!("Failed to add sudo rule: {}", response)
+        }
+    }
+
+    /// Remove a sudo rule (Root only)
+    pub async fn remove_sudo_rule(&self, pattern: &[String]) -> Result<()> {
+        let pattern_str = pattern.join(",");
+        let cmd = format!("SUDO_REMOVE;{}", pattern_str);
+        let response = self.send_command(&cmd).await?;
+        
+        if response.starts_with("OK") {
+            Ok(())
+        } else {
+            anyhow::bail!("Failed to remove sudo rule: {}", response)
+        }
+    }
+
+    /// Check if a sudo command should be allowed
+    pub async fn check_sudo(&self, pid: u32, cmd: Option<&str>) -> Result<bool> {
+        let command = if let Some(c) = cmd {
+            format!("CHECK_SUDO {} {}", pid, c)
+        } else {
+            format!("CHECK_SUDO {}", pid)
+        };
+        
+        let response = self.send_command(&command).await?;
+        
+        if response.starts_with("OK") {
+            Ok(true)
+        } else if response.starts_with("DENY") {
+            Ok(false)
+        } else {
+            anyhow::bail!("Unexpected response from daemon: {}", response)
+        }
     }
 }
 

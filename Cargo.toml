@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     "kprotect-daemon", "kprotect-cli", "kprotect-client",
     "kprotect-common", "xtask"
-]
+, "kprotect-pam"]
 exclude = [
     "kprotect-ebpf",
     "kprotect-ui/src-tauri",

@@ -21,7 +21,17 @@ function formatTimeAgo(timestamp: number | null): string {
 }
 
 export function Notifications() {
-    const { isRootActive, blockedAlertsEnabled, setBlockedAlertsEnabled, authorizedAlertsEnabled, setAuthorizedAlertsEnabled } = useGlobal();
+    const {
+        isRootActive,
+        blockedAlertsEnabled,
+        setBlockedAlertsEnabled,
+        authorizedAlertsEnabled,
+        setAuthorizedAlertsEnabled,
+        sudoBlockedAlertsEnabled,
+        setSudoBlockedAlertsEnabled,
+        sudoAuthorizedAlertsEnabled,
+        setSudoAuthorizedAlertsEnabled
+    } = useGlobal();
     const [rules, setRules] = useState<NotificationRule[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -65,6 +75,9 @@ export function Notifications() {
             toast.error(e.toString());
         }
     };
+
+    // Local alerts for Sudo events (no longer daemon rules)
+    // removed handleSudoToggle
 
     const handleDelete = async (id: number, ruleName: string) => {
         try {
@@ -117,6 +130,8 @@ export function Notifications() {
         switch (type) {
             case 'Verified': return <ShieldCheck className="text-emerald-500" size={14} />;
             case 'Blocked': return <AlertTriangle className="text-rose-500" size={14} />;
+            case 'SudoVerified': return <ShieldCheck className="text-indigo-500" size={14} />;
+            case 'SudoBlocked': return <AlertTriangle className="text-amber-500" size={14} />;
             default: return null;
         }
     };
@@ -131,7 +146,7 @@ export function Notifications() {
                 <div className="flex items-center space-x-3">
                     <div className="flex items-center space-x-3 bg-white border border-zinc-200 px-4 py-2.5 rounded-xl shadow-sm">
                         <AlertTriangle size={18} className={blockedAlertsEnabled ? "text-rose-600" : "text-zinc-400"} />
-                        <span className="text-sm font-bold text-zinc-700 tracking-tight">Desktop Blocked Alerts</span>
+                        <span className="text-sm font-bold text-zinc-700 tracking-tight">Desktop Blocked</span>
                         <button
                             onClick={() => setBlockedAlertsEnabled(!blockedAlertsEnabled)}
                             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${blockedAlertsEnabled ? 'bg-rose-600' : 'bg-zinc-300'}`}
@@ -142,12 +157,35 @@ export function Notifications() {
 
                     <div className="flex items-center space-x-3 bg-white border border-zinc-200 px-4 py-2.5 rounded-xl shadow-sm">
                         <ShieldCheck size={18} className={authorizedAlertsEnabled ? "text-emerald-600" : "text-zinc-400"} />
-                        <span className="text-sm font-bold text-zinc-700 tracking-tight">Desktop Verified Alerts</span>
+                        <span className="text-sm font-bold text-zinc-700 tracking-tight">Desktop Verified</span>
                         <button
                             onClick={() => setAuthorizedAlertsEnabled(!authorizedAlertsEnabled)}
                             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${authorizedAlertsEnabled ? 'bg-emerald-600' : 'bg-zinc-300'}`}
                         >
                             <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${authorizedAlertsEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                        </button>
+                    </div>
+
+                    {/* Sudo Toggles */}
+                    <div className="flex items-center space-x-3 bg-white border border-zinc-200 px-4 py-2.5 rounded-xl shadow-sm">
+                        <Bell size={18} className={sudoBlockedAlertsEnabled ? "text-rose-600" : "text-zinc-400"} />
+                        <span className="text-sm font-bold text-zinc-700 tracking-tight">Sudo Blocked Alerts</span>
+                        <button
+                            onClick={() => setSudoBlockedAlertsEnabled(!sudoBlockedAlertsEnabled)}
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${sudoBlockedAlertsEnabled ? 'bg-rose-600' : 'bg-zinc-300'}`}
+                        >
+                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${sudoBlockedAlertsEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                        </button>
+                    </div>
+
+                    <div className="flex items-center space-x-3 bg-white border border-zinc-200 px-4 py-2.5 rounded-xl shadow-sm">
+                        <Bell size={18} className={sudoAuthorizedAlertsEnabled ? "text-emerald-600" : "text-zinc-400"} />
+                        <span className="text-sm font-bold text-zinc-700 tracking-tight">Sudo Verified Alerts</span>
+                        <button
+                            onClick={() => setSudoAuthorizedAlertsEnabled(!sudoAuthorizedAlertsEnabled)}
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${sudoAuthorizedAlertsEnabled ? 'bg-emerald-600' : 'bg-zinc-300'}`}
+                        >
+                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${sudoAuthorizedAlertsEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
                         </button>
                     </div>
 
@@ -344,8 +382,8 @@ export function Notifications() {
 
                                     <div>
                                         <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-1.5 ml-1">Event Types</label>
-                                        <div className="flex items-center space-x-2">
-                                            {['Verified', 'Blocked'].map(type => (
+                                        <div className="flex flex-wrap gap-2">
+                                            {['Verified', 'Blocked', 'SudoVerified', 'SudoBlocked'].map(type => (
                                                 <button
                                                     key={type}
                                                     type="button"

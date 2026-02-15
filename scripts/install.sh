@@ -83,6 +83,17 @@ else
     warn "kprotect-cli binary not found in target/release/."
 fi
 
+# Install PAM module
+if [ -f "target/release/libkprotect_pam.so" ]; then
+    info "Installing PAM module to system security directories..."
+    for dir in "/lib/x86_64-linux-gnu/security" "/usr/lib/security" "/lib/security"; do
+        if [ -d "$dir" ]; then
+            install -m 644 target/release/libkprotect_pam.so "$dir/pam_kprotect.so"
+            success "Installed to $dir/pam_kprotect.so"
+        fi
+    done
+fi
+
 
 
 # Install Service

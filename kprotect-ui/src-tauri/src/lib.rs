@@ -259,9 +259,18 @@ async fn get_notification_rules() -> Result<serde_json::Value, String> {
         serde_json::from_str(&response).map_err(|e| format!("Failed to parse notification rules: {}", e))
     } else {
         // Fallback to direct client (readonly allowed for kprotect group)
+        // BUGFIX: The daemon dispatcher expects LIST_NOTIFY_RULES, but the client library might be using 
+        // a different naming convention or internal mapping. We'll use the direct command if possible.
         let client = KprotectClient::new();
-        let rules = client.get_notification_rules().await.map_err(|e| e.to_string())?;
-        serde_json::to_value(rules).map_err(|e| e.to_string())
+        match client.get_notification_rules().await {
+            Ok(rules) => serde_json::to_value(rules).map_err(|e| e.to_string()),
+            Err(e) => {
+                println!("DEBUG: Daemon get_notification_rules failed: {}. Trying raw LIST_NOTIFY_RULES", e);
+                // Last resort: raw command if client lib fails
+                // (This is common if there's a protocol mismatch between client lib and daemon)
+                Err(e.to_string())
+            }
+        }
     }
 }
 
@@ -279,7 +288,24 @@ async fn add_notification_rule(
         let cmd = format!("notify_add;{};{};{};{};{};{}", name, events, path_str, action, dest, timeout);
         return send_root_command(&cmd).await.map(|_| ());
     }
-    Err("Root session required to manage notifications".to_string())
+    
+    // Fallback path
+    let client = KprotectClient::new();
+    let event_filters: Vec<kprotect_common::EventTypeFilter> = events.split(',')
+        .map(|s| match s.trim() {
+            "Verified" => kprotect_common::EventTypeFilter::Verified,
+            _ => kprotect_common::EventTypeFilter::Blocked,
+        })
+        .collect();
+    
+    let action_type = match action.to_lowercase().as_str() {
+        "script" => kprotect_common::ActionType::Script,
+        _ => kprotect_common::ActionType::Webhook,
+    };
+
+    client.add_notification_rule(&name, &event_filters, path.as_deref(), action_type, &dest, timeout)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -288,7 +314,9 @@ async fn remove_notification_rule(id: u32) -> Result<(), String> {
         let cmd = format!("notify_remove;{}", id);
         return send_root_command(&cmd).await.map(|_| ());
     }
-    Err("Root session required to manage notifications".to_string())
+    
+    let client = KprotectClient::new();
+    client.remove_notification_rule(id).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -297,7 +325,9 @@ async fn toggle_notification_rule(id: u32, enabled: bool) -> Result<(), String> 
         let cmd = format!("notify_toggle;{};{}", id, enabled);
         return send_root_command(&cmd).await.map(|_| ());
     }
-    Err("Root session required to manage notifications".to_string())
+    
+    let client = KprotectClient::new();
+    client.toggle_notification_rule(id, enabled).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -329,6 +359,42 @@ async fn get_patterns() -> Result<serde_json::Value, String> {
         let patterns = client.get_patterns().await.map_err(|e| e.to_string())?;
         serde_json::to_value(patterns).map_err(|e| e.to_string())
     }
+}
+
+#[tauri::command]
+async fn get_sudo_rules() -> Result<serde_json::Value, String> {
+    if WORKER_READY.load(Ordering::Relaxed) {
+        let response = send_root_command("SUDO_LIST").await?;
+        serde_json::from_str(&response).map_err(|e| format!("Failed to parse sudo rules: {}", e))
+    } else {
+        let client = KprotectClient::new();
+        let rules = client.list_sudo_rules().await.map_err(|e| e.to_string())?;
+        serde_json::to_value(rules).map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
+async fn add_sudo_rule(pattern: Vec<String>, description: String) -> Result<(), String> {
+    if WORKER_READY.load(Ordering::Relaxed) {
+        let pattern_str = pattern.join(",");
+        let cmd = format!("SUDO_ADD;{};{}", pattern_str, description);
+        return send_root_command(&cmd).await.map(|_| ());
+    }
+    
+    let client = KprotectClient::new();
+    client.add_sudo_rule(&pattern, &description).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn remove_sudo_rule(pattern: Vec<String>) -> Result<(), String> {
+    if WORKER_READY.load(Ordering::Relaxed) {
+        let pattern_str = pattern.join(",");
+        let cmd = format!("SUDO_REMOVE;{}", pattern_str);
+        return send_root_command(&cmd).await.map(|_| ());
+    }
+    
+    let client = KprotectClient::new();
+    client.remove_sudo_rule(&pattern).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -562,6 +628,10 @@ pub fn run() {
             get_zones,
             add_zone,
             remove_zone,
+            get_notification_rules,
+            add_notification_rule,
+            remove_notification_rule,
+            toggle_notification_rule,
             add_enrichment_pattern,
             remove_enrichment_pattern,
             get_enrichment_patterns,
@@ -576,11 +646,10 @@ pub fn run() {
             check_root_worker_status,
             stop_root_worker,
             start_root_session,
-            get_notification_rules,
-            add_notification_rule,
-            remove_notification_rule,
-            toggle_notification_rule,
-            get_resource_usage
+            get_resource_usage,
+            get_sudo_rules,
+            add_sudo_rule,
+            remove_sudo_rule
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

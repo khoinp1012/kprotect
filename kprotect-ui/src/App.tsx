@@ -19,46 +19,37 @@
 import { useState } from 'react';
 import { GlobalProvider } from './context/GlobalContext';
 import { Layout } from './components/Layout';
-import { EventList } from './components/EventList';
-import { AuthorizedPatterns } from './components/AuthorizedPatterns';
-import { Policies } from './pages/Policies';
-import { Settings } from './pages/Settings';
 import { Dashboard } from './pages/Dashboard';
-import { Notifications } from './pages/Notifications';
+import { FileProtection } from './pages/FileProtection';
+import { QuickSudo } from './pages/QuickSudo';
+import { SystemConfig } from './pages/SystemConfig';
 import { Toaster } from 'sonner';
 
-function AppContent() {
-    const [activeTab, setActiveTab] = useState<'dashboard' | 'events' | 'allowlist' | 'zones' | 'enrichment' | 'notifications' | 'settings'>('dashboard');
+const AppContent = () => {
+    type NavState = 'dashboard' | 'file-protection' | 'quick-sudo' | 'system-config';
+
+    const [activeTab, setActiveTab] = useState<NavState>('dashboard');
 
     const renderContent = () => {
         switch (activeTab) {
             case 'dashboard':
                 return <Dashboard />;
-            case 'events':
-                return <EventList />;
-            case 'allowlist':
-                return <AuthorizedPatterns />;
-            case 'zones':
-                return <Policies initialTab="zones" />;
-            case 'enrichment':
-                return <Policies initialTab="enrichment" />;
-            case 'notifications':
-                return <Notifications />;
-            case 'settings':
-                return <Settings />;
+            case 'file-protection':
+                return <FileProtection />;
+            case 'quick-sudo':
+                return <QuickSudo />;
+            case 'system-config':
+                return <SystemConfig />;
             default:
                 return null;
         }
     };
 
-    const titles: Record<string, string> = {
+    const titles: Record<NavState, string> = {
         dashboard: 'Security Dashboard',
-        events: 'Live Event Feed',
-        allowlist: 'Authorized Patterns',
-        zones: 'Security Zones',
-        enrichment: 'Interpreter Tracing',
-        notifications: 'Event Notifications',
-        settings: 'System Settings'
+        'file-protection': 'File Protection',
+        'quick-sudo': 'Quick Sudo',
+        'system-config': 'System Configuration'
     };
 
     return (

@@ -1,18 +1,21 @@
 import { ReactNode, useState } from 'react';
-import { List, Settings, Menu, Zap, CheckCircle, Power, Layers, Code2, LayoutDashboard, Bell, X } from "lucide-react";
+import {
+    Menu, Zap, CheckCircle, Power,
+    LayoutDashboard, Shield, Fingerprint, Settings2
+} from "lucide-react";
 import { useGlobal } from '../context/GlobalContext';
 import { api } from '../api';
 import { toast } from 'sonner';
 
 interface LayoutProps {
     children: ReactNode;
-    activeTab: string;
+    activeTab: 'dashboard' | 'file-protection' | 'quick-sudo' | 'system-config';
     setActiveTab: (tab: any) => void;
     title: string;
 }
 
 export function Layout({ children, activeTab, setActiveTab, title }: LayoutProps) {
-    const { isConnected, isRootActive, allowlistCount, events, checkRootStatus, refreshAllowlist } = useGlobal();
+    const { isRootActive, checkRootStatus, refreshAllowlist } = useGlobal();
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
     const handleTriggerRoot = async () => {
@@ -25,7 +28,6 @@ export function Layout({ children, activeTab, setActiveTab, title }: LayoutProps
             });
             await promise;
 
-            // Poll for status (wait for password entry, up to 60s)
             let attempts = 0;
             while (attempts < 300) {
                 await new Promise(r => setTimeout(r, 200));
@@ -37,9 +39,7 @@ export function Layout({ children, activeTab, setActiveTab, title }: LayoutProps
                 }
                 attempts++;
             }
-        } catch (e: any) {
-            // Toast handled above
-        }
+        } catch (e: any) { }
     };
 
     const handleStopRoot = async () => {
@@ -53,80 +53,65 @@ export function Layout({ children, activeTab, setActiveTab, title }: LayoutProps
         }
     };
 
-    const navItems = [
-        { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={20} /> },
-        { id: 'events', label: 'Live Feed', icon: <List size={20} />, badge: events.length > 0 ? events.length.toString() : undefined },
-        { id: 'allowlist', label: 'Allowlist', icon: <CheckCircle size={20} />, badge: allowlistCount > 0 ? allowlistCount.toString() : undefined },
-        { id: 'notifications', label: 'Notifications', icon: <Bell size={20} /> },
+    const sidebarItems = [
+        { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={20} />, hub: 'Global Status' },
+        { id: 'file-protection', label: 'File Protection', icon: <Shield size={20} />, hub: 'Security' },
+        { id: 'quick-sudo', label: 'Quick Sudo', icon: <Fingerprint size={20} />, hub: 'Security' },
+        { id: 'system-config', label: 'System Config', icon: <Settings2 size={20} />, hub: 'Management' },
     ];
 
-    const policyItems = [
-        { id: 'zones', label: 'Security Zones', icon: <Layers size={20} /> },
-        { id: 'enrichment', label: 'Interpreters', icon: <Code2 size={20} /> },
-    ];
-
-
-    const handleNavClick = (id: string) => {
-        setActiveTab(id);
-        setIsSidebarOpen(false);
-    };
+    const hubGroups = ['Global Status', 'Security', 'Management'];
 
     return (
-        <div className="flex min-h-screen bg-white text-zinc-900 font-sans selection:bg-indigo-500/30">
-            {/* Sidebar (Drawer on mobile) */}
-            <aside
-                className={`fixed inset-y-0 left-0 z-50 w-72 bg-zinc-50 border-r border-zinc-200 transform transition-transform duration-300 ease-in-out lg:sticky lg:top-0 lg:h-screen lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
-                    } flex flex-col`}
-            >
-                <div className="p-6">
-                    <div className="flex items-center justify-between mb-8 px-2">
-                        <div className="flex items-center space-x-3">
-                            <div className="w-10 h-10 rounded-lg shadow-sm overflow-hidden bg-indigo-600 flex items-center justify-center">
-                                <img src="/logo.png" alt="kprotect logo" className="w-full h-full object-cover" />
-                            </div>
-                            <div>
-                                <h1 className="text-lg font-bold text-zinc-900 tracking-tight">kprotect</h1>
-                                <div className="flex items-center space-x-2 mt-0.5">
-                                    <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-rose-500'}`}></div>
-                                    <span className="text-[10px] font-bold text-zinc-500 tracking-wider uppercase">
-                                        {isConnected ? 'Online' : 'Offline'}
-                                    </span>
+        <div className="flex h-screen bg-[#FDFDFE] overflow-hidden text-zinc-900 font-sans selection:bg-indigo-100 selection:text-indigo-900">
+            {/* Sidebar */}
+            <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-zinc-200 transform transition-all duration-300 ease-in-out lg:relative lg:translate-x-0 overflow-y-auto ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+                <div className="flex flex-col h-full">
+                    {/* Brand */}
+                    <div className="p-8 pb-4">
+                        <div className="flex items-center space-x-3 mb-2">
+                            <div className="relative group">
+                                <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 to-blue-600 rounded-xl blur opacity-25 group-hover:opacity-50 transition duration-1000"></div>
+                                <div className="relative p-2 bg-indigo-600 rounded-xl text-white shadow-lg shadow-indigo-200">
+                                    <Shield size={24} strokeWidth={2.5} />
                                 </div>
                             </div>
+                            <div>
+                                <h1 className="text-xl font-black tracking-tight text-zinc-900 leading-none">kprotect</h1>
+                                <p className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest mt-1">Enterprise Shield</p>
+                            </div>
                         </div>
-                        <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden p-2 hover:bg-zinc-200 rounded-lg text-zinc-600">
-                            <X size={20} />
-                        </button>
                     </div>
 
-                    <nav className="space-y-1">
-                        {navItems.map(item => (
-                            <NavItem
-                                key={item.id}
-                                active={activeTab === item.id}
-                                onClick={() => handleNavClick(item.id)}
-                                icon={item.icon}
-                                label={item.label}
-                                badge={item.badge}
-                            />
+                    {/* Navigation */}
+                    <nav className="flex-1 px-4 py-8 space-y-8">
+                        {hubGroups.map((hub) => (
+                            <div key={hub} className="space-y-1">
+                                <h3 className="px-4 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] mb-4">{hub}</h3>
+                                {sidebarItems.filter(item => item.hub === hub).map((item) => (
+                                    <button
+                                        key={item.id}
+                                        onClick={() => {
+                                            setActiveTab(item.id);
+                                            setIsSidebarOpen(false);
+                                        }}
+                                        className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-bold transition-all duration-200 group ${activeTab === item.id
+                                            ? 'bg-zinc-900 text-white shadow-xl shadow-zinc-200 translate-x-1'
+                                            : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50'
+                                            }`}
+                                    >
+                                        <span className={`${activeTab === item.id ? 'text-indigo-400' : 'text-zinc-400 group-hover:text-zinc-600'}`}>
+                                            {item.icon}
+                                        </span>
+                                        <span className="flex-1 text-left">{item.label}</span>
+                                        {activeTab === item.id && (
+                                            <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 shadow-sm shadow-indigo-400/50" />
+                                        )}
+                                    </button>
+                                ))}
+                            </div>
                         ))}
-
-                        <div className="my-6 border-t border-zinc-200 mx-2"></div>
-                        <span className="px-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest block mb-2">Policy Configuration</span>
-                        {policyItems.map(item => (
-                            <NavItem
-                                key={item.id}
-                                active={activeTab === item.id}
-                                onClick={() => handleNavClick(item.id)}
-                                icon={item.icon}
-                                label={item.label}
-                            />
-                        ))}
-
                     </nav>
-                </div>
-                <div className="mt-auto p-4 border-t border-zinc-200">
-                    <NavItem active={activeTab === 'settings'} onClick={() => handleNavClick('settings')} icon={<Settings size={20} />} label="Settings" />
                 </div>
             </aside>
 
@@ -185,29 +170,5 @@ export function Layout({ children, activeTab, setActiveTab, title }: LayoutProps
                 </div>
             </main>
         </div>
-    );
-}
-
-function NavItem({ active, onClick, icon, label, badge }: any) {
-    return (
-        <button
-            onClick={onClick}
-            className={`w-full flex items-center px-3 py-2.5 rounded-xl transition-all duration-200 group relative ${active
-                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100'
-                : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900'
-                }`}
-        >
-            <div className="flex items-center space-x-3">
-                <span className={`${active ? 'text-white' : 'text-zinc-400 group-hover:text-zinc-600'}`}>
-                    {icon}
-                </span>
-                <span className="text-sm font-bold tracking-tight">{label}</span>
-            </div>
-            {badge && (
-                <span className={`ml-auto px-1.5 py-0.5 rounded-lg text-[10px] font-bold ${active ? 'bg-white/20 text-white' : 'bg-zinc-200 text-zinc-600'}`}>
-                    {badge}
-                </span>
-            )}
-        </button>
     );
 }

@@ -418,7 +418,7 @@ const MobileEventCard = React.memo(({ event, isLast, lastElementRef, isSelected,
                             {event.count}x
                         </span>
                     )}
-                    <StatusBadge status={event.status} isAuthorized={isNowAuthorized} />
+                    <StatusBadge originalStatus={event.status} isNowAuthorized={isNowAuthorized} />
                 </div>
                 <div className="flex items-center space-x-1.5">
                     {event.status !== 'Birth' && event.chain && event.chain.length > 0 && (
@@ -524,7 +524,7 @@ const EventRow = React.memo(({ event, isLast, lastElementRef, isSelected, onSele
                     </div>
                 </td>
                 <td className="px-6 py-4 align-top w-32">
-                    <StatusBadge status={event.status} isAuthorized={isNowAuthorized} />
+                    <StatusBadge originalStatus={event.status} isNowAuthorized={isNowAuthorized} />
                 </td>
                 <td className="px-6 py-4 font-mono text-zinc-500 text-xs align-top w-20">{event.pid}</td>
                 <td className="px-6 py-4 align-top max-w-[200px]">
@@ -621,8 +621,8 @@ const EventRow = React.memo(({ event, isLast, lastElementRef, isSelected, onSele
     );
 });
 
-function StatusBadge({ status, isAuthorized }: { status: string, isAuthorized?: boolean }) {
-    if (isAuthorized || status === 'Verified') {
+export function StatusBadge({ originalStatus, isNowAuthorized }: { originalStatus: string, isNowAuthorized?: boolean }) {
+    if (originalStatus === 'Verified') {
         return (
             <span className="inline-flex items-center space-x-1.5 text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
                 <CheckCircle size={10} strokeWidth={3} />
@@ -630,15 +630,23 @@ function StatusBadge({ status, isAuthorized }: { status: string, isAuthorized?: 
             </span>
         );
     }
-    if (status === 'Blocked') {
+    if (originalStatus === 'Blocked') {
         return (
-            <span className="inline-flex items-center space-x-1.5 text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-100" title="Originally Blocked">
-                <div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div>
-                <span className="text-[10px] font-bold">Blocked</span>
-            </span>
+            <div className="flex flex-col space-y-1">
+                <span className="inline-flex items-center space-x-1.5 text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-100 w-fit" title="Originally Blocked">
+                    <div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div>
+                    <span className="text-[10px] font-bold">Blocked</span>
+                </span>
+                {isNowAuthorized && (
+                    <span className="inline-flex items-center space-x-1 text-emerald-600 font-bold text-[9px] uppercase tracking-tighter ml-1">
+                        <ShieldCheck size={10} />
+                        <span>Now Authorized</span>
+                    </span>
+                )}
+            </div>
         );
     }
-    if (status === 'Unknown') {
+    if (originalStatus === 'Unknown') {
         return (
             <span className="inline-flex items-center space-x-1.5 text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-100">
                 <div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div>
@@ -646,7 +654,7 @@ function StatusBadge({ status, isAuthorized }: { status: string, isAuthorized?: 
             </span>
         );
     }
-    if (status === 'Birth') {
+    if (originalStatus === 'Birth') {
         return (
             <span className="inline-flex items-center space-x-1.5 text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">
                 <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>

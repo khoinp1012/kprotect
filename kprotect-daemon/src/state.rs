@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use dashmap::DashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
 use aya::maps::{HashMap as BpfHashMap, MapData};
@@ -11,9 +12,10 @@ use crate::config;
 use crate::notifications;
 
 pub struct AppState {
-    pub lineage_cache: HashMap<u32, LineageNode>,
+    pub lineage_cache: Arc<DashMap<u32, LineageNode>>,
     pub event_tx: broadcast::Sender<String>,
     pub authorized_patterns: Vec<AuthorizedPattern>,
+    pub sudo_rules: Vec<kprotect_common::SudoRule>,
     // Optimization Caches
     pub auth_exact_cache: HashMap<Vec<String>, AuthorizedPattern>,
     pub auth_suffix_cache: ChainTrieNode,

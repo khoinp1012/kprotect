@@ -5,14 +5,15 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
 use tokio::net::UnixListener;
 use std::collections::HashMap;
+use dashmap::DashMap;
 use log::{info, warn, error};
 use aya::maps::HashMap as BpfHashMap;
 use aya::maps::lpm_trie::LpmTrie;
 use aya::maps::MapData;
 
-use crate::state::{self, AppState};
+use crate::state::AppState;
 use kprotect_common::AuthorizedPattern;
-use crate::core::domain::{LineageNode, ChainTrieNode, PatternType, PathKey};
+use crate::core::domain::{ChainTrieNode, PatternType, PathKey};
 use crate::core::auth::{rebuild_auth_caches, parse_pattern, insert_prefix, insert_suffix};
 use crate::crypto;
 use crate::migration::{self, ZonesFile};
@@ -21,10 +22,18 @@ use crate::logger;
 use crate::notifications;
 use crate::server::api::handle_client;
 
+#[cfg(not(debug_assertions))]
 const PID_FILE: &str = "/run/kprotect/kprotect.pid";
+#[cfg(debug_assertions)]
+const PID_FILE: &str = "/tmp/kprotect.pid";
+
+#[cfg(not(debug_assertions))]
 const SOCKET_PATH: &str = "/run/kprotect/kprotect.sock";
+#[cfg(debug_assertions)]
+const SOCKET_PATH: &str = "/tmp/kprotect.sock";
 const AUTHORIZED_PATTERNS_PATH: &str = "/var/lib/kprotect/configs/authorized_patterns.enc";
 const NOTIFICATION_RULES_PATH: &str = "/var/lib/kprotect/configs/notifications.enc";
+const SUDO_RULES_PATH: &str = "/var/lib/kprotect/configs/sudo_patterns.enc";
 const MAX_RED_ZONE_PATTERNS: usize = 192;
 
 pub async fn start_daemon() -> Result<()> {
@@ -113,9 +122,10 @@ pub async fn start_daemon() -> Result<()> {
 
     // Create minimal temporary state for immediate monitoring
     let temp_state_obj = AppState {
-        lineage_cache: HashMap::new(),
+        lineage_cache: Arc::new(DashMap::new()),
         event_tx: event_tx_init.clone(),
         authorized_patterns: Vec::new(),  // Will be loaded later
+        sudo_rules: Vec::new(),           // Will be loaded later
         auth_exact_cache: HashMap::new(),
         auth_suffix_cache: ChainTrieNode::new(),
         event_sequence: 0,
@@ -300,6 +310,14 @@ pub async fn start_daemon() -> Result<()> {
         });
     info!("  🔔 Notification rules: {}", notification_rules.len());
 
+    // Load persistent sudo rules
+    let sudo_rules: Vec<kprotect_common::SudoRule> = crypto::load_encrypted(SUDO_RULES_PATH, &key)
+        .unwrap_or_else(|_| {
+            info!("No sudo rules file found, starting fresh.");
+            Vec::new()
+        });
+    info!("  🛡️ Sudo bypass rules: {}", sudo_rules.len());
+
     // Initialize Notification Manager
     let notification_manager = Arc::new(notifications::NotificationManager::new(notification_rules, key.clone()));
 
@@ -324,6 +342,7 @@ pub async fn start_daemon() -> Result<()> {
     {
         let mut state_lock = state.lock().await;
         state_lock.authorized_patterns = authorized_patterns;
+        state_lock.sudo_rules = sudo_rules;
         state_lock.event_sequence = initial_id;
         state_lock.logger = logger.clone();
         state_lock.config = Arc::new(Mutex::new(daemon_config.clone()));
@@ -362,6 +381,40 @@ pub async fn start_daemon() -> Result<()> {
                 warn!("Failed to cleanup audit logs: {}", e);
             }
             info!("🧹 Log cleanup completed");
+        }
+    });
+    
+    // Spawn background lineage cache cleanup task (prevents memory leak)
+    // Aggressively removes exited processes that weren't cleaned up due to lost events
+    let state_clone = Arc::clone(&state);
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(3600)); // Hourly
+        loop {
+            interval.tick().await;
+            let state_lock = state_clone.lock().await;
+            let cache_size_before = state_lock.lineage_cache.len();
+            let removed = crate::core::process::cleanup_exited_processes(&state_lock.lineage_cache, false);
+            let cache_size_after = state_lock.lineage_cache.len();
+            
+            // Also do a forced cleanup (remove exited processes even with children) every 6 hours
+            // to handle edge cases where child_count tracking gets corrupted
+            let hour = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| (d.as_secs() / 3600) % 24)
+                .unwrap_or(0);
+            
+            if removed > 0 {
+                info!("🧹 Lineage cache cleanup: removed {} exited processes ({} -> {})", 
+                      removed, cache_size_before, cache_size_after);
+            }
+            
+            if hour % 6 == 0 && removed == 0 {
+                // Run forced cleanup if normal cleanup didn't find anything
+                let forced_removed = crate::core::process::cleanup_exited_processes(&state_lock.lineage_cache, true);
+                if forced_removed > 0 {
+                    info!("🧹 Emergency lineage cleanup: forcefully removed {} exited processes", forced_removed);
+                }
+            }
         }
     });
     
