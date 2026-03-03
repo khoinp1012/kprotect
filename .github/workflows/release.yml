@@ -48,7 +48,8 @@ jobs:
             file \
             libssl-dev \
             libgtk-3-dev \
-            librsvg2-dev
+            librsvg2-dev \
+            libpam0g-dev
 
       - name: Install bpf-linker
         run: cargo install bpf-linker

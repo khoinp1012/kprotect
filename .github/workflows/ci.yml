@@ -39,7 +39,7 @@ jobs:
       - name: Install LLVM (for eBPF dependencies)
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm clang libelf-dev libbpf-dev
+          sudo apt-get install -y llvm clang libelf-dev libbpf-dev libpam0g-dev
 
       - name: Cache Cargo Dependencies
         uses: actions/cache@v4
