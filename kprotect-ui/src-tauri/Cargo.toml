@@ -26,6 +26,6 @@ kprotect-client = { path = "../../kprotect-client" }
 kprotect-common = { path = "../../kprotect-common" }
 tokio = { version = "1", features = ["full"] }
 tauri-plugin-notification = "2.3.3"
-tauri-plugin-dialog = "2.0.3"
-tauri-plugin-fs = "2.0.2"
+tauri-plugin-dialog = "2.6.0"
+tauri-plugin-fs = "2.4.5"
 
