@@ -69,7 +69,7 @@ jobs:
       - name: Install LLVM & Clang
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm clang libelf-dev
+          sudo apt-get install -y llvm clang libelf-dev libpam0g-dev
 
       - name: Install bpf-linker
         run: cargo install bpf-linker
@@ -122,7 +122,7 @@ jobs:
       - name: Install LLVM & Clang
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm clang libelf-dev
+          sudo apt-get install -y llvm clang libelf-dev libpam0g-dev
 
       - name: Install cargo-deb
         run: cargo install cargo-deb
