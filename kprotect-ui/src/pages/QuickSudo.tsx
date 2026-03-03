@@ -25,6 +25,15 @@ export function QuickSudo({ initialTab = 'feed' }: QuickSudoProps = {}) {
     const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
     const [authDesc, setAuthDesc] = useState('');
 
+    // Add Rule Modal State
+    const [addModalOpen, setAddModalOpen] = useState(false);
+    const [newRulePattern, setNewRulePattern] = useState('');
+    const [newRuleDesc, setNewRuleDesc] = useState('');
+
+    // Delete Confirmation State
+    const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+    const [ruleToDelete, setRuleToDelete] = useState<string[] | null>(null);
+
     useEffect(() => {
         if (activeTab === 'rules') loadRules();
     }, [activeTab, isRootActive]);
@@ -73,19 +82,21 @@ export function QuickSudo({ initialTab = 'feed' }: QuickSudoProps = {}) {
         );
     };
 
-    const handleAddRule = async () => {
-        // Simple prompt for now, could be a modal
-        const patternStr = prompt("Enter process lineage (comma separated paths):");
-        if (!patternStr) return;
-        const description = prompt("Enter rule description:");
-        if (!description) return;
+    const handleAddRule = () => {
+        setNewRulePattern('');
+        setNewRuleDesc('');
+        setAddModalOpen(true);
+    };
 
-        const pattern = patternStr.split(',').map(s => s.trim());
+    const submitAddRule = async () => {
+        if (!newRulePattern || !newRuleDesc) return;
+        const pattern = newRulePattern.split(',').map(s => s.trim());
 
         toast.promise(
             async () => {
-                await api.addSudoRule(pattern, description);
+                await api.addSudoRule(pattern, newRuleDesc);
                 await loadRules();
+                setAddModalOpen(false);
             },
             { loading: 'Adding sudo rule...', success: 'Rule added', error: (e) => `Failed: ${e}` }
         );
@@ -93,13 +104,18 @@ export function QuickSudo({ initialTab = 'feed' }: QuickSudoProps = {}) {
 
 
 
-    const handleDeleteRule = async (pattern: string[]) => {
-        if (!confirm(`Are you sure you want to remove the rule for:\n\n${pattern.join(" -> ")}`)) return;
+    const handleDeleteRule = (pattern: string[]) => {
+        setRuleToDelete(pattern);
+        setDeleteModalOpen(true);
+    };
 
+    const confirmDeleteRule = async () => {
+        if (!ruleToDelete) return;
         toast.promise(
             async () => {
-                await api.removeSudoRule(pattern);
+                await api.removeSudoRule(ruleToDelete);
                 await loadRules();
+                setDeleteModalOpen(false);
             },
             { loading: 'Removing rule...', success: 'Rule removed', error: (e) => `Failed: ${e}` }
         );
@@ -258,7 +274,7 @@ export function QuickSudo({ initialTab = 'feed' }: QuickSudoProps = {}) {
                                                         </div>
                                                     </td>
                                                     <td className="px-6 py-4 align-top w-32">
-                                                        <StatusBadge originalStatus={ev.status === 'Elevation' ? 'Verified' : 'Blocked'} />
+                                                        <StatusBadge originalStatus={ev.status} />
                                                     </td>
                                                     <td className="px-6 py-4 font-mono text-zinc-500 text-xs align-top w-20">{ev.pid}</td>
                                                     <td className="px-6 py-4 align-top max-w-[200px]">
@@ -412,6 +428,110 @@ export function QuickSudo({ initialTab = 'feed' }: QuickSudoProps = {}) {
                                     </button>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Add Rule Modal */}
+            {addModalOpen && (
+                <div className="fixed inset-0 bg-zinc-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+                    <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-lg p-6 animate-in slide-in-from-bottom-full sm:slide-in-from-bottom-4 duration-300">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-lg font-bold text-zinc-900 flex items-center">
+                                <Plus className="mr-2 text-indigo-600" size={20} />
+                                Add Quick Sudo Rule
+                            </h3>
+                            <button onClick={() => setAddModalOpen(false)} className="p-2 hover:bg-zinc-100 rounded-full transition-colors">
+                                <X size={20} className="text-zinc-400" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-6">
+                            <div>
+                                <label className="block text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">Process Lineage (comma separated)</label>
+                                <input
+                                    type="text"
+                                    value={newRulePattern}
+                                    onChange={(e) => setNewRulePattern(e.target.value)}
+                                    className="w-full px-4 py-3 rounded-xl border border-zinc-300 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm font-mono transition-all"
+                                    placeholder="/lib/systemd/systemd, /usr/bin/sudo, ..."
+                                />
+                                <p className="mt-2 text-[10px] text-zinc-500">Provide the full execution chain required for this elevation.</p>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">Rule Purpose</label>
+                                <input
+                                    type="text"
+                                    value={newRuleDesc}
+                                    onChange={(e) => setNewRuleDesc(e.target.value)}
+                                    className="w-full px-4 py-3 rounded-xl border border-zinc-300 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm transition-all"
+                                    placeholder="e.g., Allow system updates"
+                                />
+                            </div>
+
+                            <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-3">
+                                <button
+                                    onClick={() => setAddModalOpen(false)}
+                                    className="flex-1 px-4 py-3 text-sm font-bold text-zinc-600 bg-zinc-100 hover:bg-zinc-200 rounded-xl transition-all"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={submitAddRule}
+                                    disabled={!newRulePattern || !newRuleDesc}
+                                    className="flex-[2] px-4 py-3 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-lg shadow-indigo-200 transition-all disabled:opacity-50"
+                                >
+                                    Add Rule
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Delete Confirmation Modal */}
+            {deleteModalOpen && (
+                <div className="fixed inset-0 bg-zinc-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+                    <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-md p-6 animate-in slide-in-from-bottom-full sm:slide-in-from-bottom-4 duration-300">
+                        <div className="flex items-center space-x-3 text-rose-600 mb-4">
+                            <div className="p-2 bg-rose-50 rounded-lg">
+                                <Trash2 size={20} />
+                            </div>
+                            <h3 className="text-lg font-bold">Delete Rule?</h3>
+                        </div>
+
+                        <p className="text-sm text-zinc-600 mb-6 leading-relaxed">
+                            Are you sure you want to remove the bypass rule for this process chain? This action cannot be undone.
+                        </p>
+
+                        {ruleToDelete && (
+                            <div className="mb-6 p-3 bg-zinc-50 rounded-xl border border-zinc-100 overflow-x-auto">
+                                <div className="flex flex-wrap gap-1">
+                                    {ruleToDelete.map((p, i) => (
+                                        <span key={i} className="font-mono text-[10px] bg-white border border-zinc-200 px-1.5 py-0.5 rounded text-zinc-500">
+                                            {p.split('/').pop()}
+                                            {i < ruleToDelete.length - 1 && " →"}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-3">
+                            <button
+                                onClick={() => setDeleteModalOpen(false)}
+                                className="flex-1 px-4 py-3 text-sm font-bold text-zinc-600 bg-zinc-100 hover:bg-zinc-200 rounded-xl transition-all"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={confirmDeleteRule}
+                                className="flex-1 px-4 py-3 text-sm font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-lg shadow-rose-100 transition-all"
+                            >
+                                Delete
+                            </button>
                         </div>
                     </div>
                 </div>

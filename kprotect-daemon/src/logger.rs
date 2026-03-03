@@ -19,41 +19,52 @@ const AUDIT_LOG_PATH: &str = "/var/log/kprotect/audit.jsonl.enc";
 pub struct EncryptedLogger {
     events_file: Arc<Mutex<File>>,
     audit_file: Arc<Mutex<File>>,
+    events_path: String,
+    audit_path: String,
     key: [u8; 32],
 }
 
 impl EncryptedLogger {
     pub fn new(key: [u8; 32]) -> Result<Self> {
+        Self::new_custom(key, EVENTS_LOG_PATH.to_string(), AUDIT_LOG_PATH.to_string())
+    }
+
+    pub fn new_custom(key: [u8; 32], events_path: String, audit_path: String) -> Result<Self> {
         // Ensure log directory exists
-        if let Some(parent) = Path::new(EVENTS_LOG_PATH).parent() {
-            std::fs::create_dir_all(parent)?;
+        if let Some(parent) = Path::new(&events_path).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Some(parent) = Path::new(&audit_path).parent() {
+            let _ = std::fs::create_dir_all(parent);
         }
 
         // Open or create log files in append mode
         let events_file = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(EVENTS_LOG_PATH)
-            .context("Failed to open events log file")?;
+            .open(&events_path)
+            .context(format!("Failed to open events log file at {}", events_path))?;
 
         let audit_file = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(AUDIT_LOG_PATH)
-            .context("Failed to open audit log file")?;
+            .open(&audit_path)
+            .context(format!("Failed to open audit log file at {}", audit_path))?;
 
         // Set file permissions to 0600 (owner read/write only)
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let permissions = std::fs::Permissions::from_mode(0o600);
-            std::fs::set_permissions(EVENTS_LOG_PATH, permissions.clone())?;
-            std::fs::set_permissions(AUDIT_LOG_PATH, permissions)?;
+            let _ = std::fs::set_permissions(&events_path, permissions.clone());
+            let _ = std::fs::set_permissions(&audit_path, permissions);
         }
 
         Ok(Self {
             events_file: Arc::new(Mutex::new(events_file)),
             audit_file: Arc::new(Mutex::new(audit_file)),
+            events_path,
+            audit_path,
             key,
         })
     }
@@ -72,9 +83,7 @@ impl EncryptedLogger {
     ) -> Result<()> {
         let entry = LogEntry::SecurityEvent {
             id: event_id,
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)?
-                .as_secs(),
+            timestamp: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),
             status: if !authorized {
                 "Blocked".to_string()
             } else {
@@ -109,9 +118,7 @@ impl EncryptedLogger {
         success: bool,
     ) -> Result<()> {
         let entry = LogEntry::AuditAction {
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)?
-                .as_secs(),
+            timestamp: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),
             action: action.to_string(),
             username: user.to_string(),
             details,
@@ -128,7 +135,7 @@ impl EncryptedLogger {
             LogEntry::SecurityEvent { .. } => {
                 let mut file = self.events_file.lock().unwrap();
                 self.write_encrypted_line(&mut file, entry)
-            },
+            }
             LogEntry::AuditAction { .. } => {
                 let mut file = self.audit_file.lock().unwrap();
                 self.write_encrypted_line(&mut file, entry)
@@ -138,44 +145,46 @@ impl EncryptedLogger {
 
     /// Read security events with pagination
     pub fn read_events(&self, count: usize, offset: usize) -> Result<Vec<LogEntry>> {
-        self.read_encrypted_lines(EVENTS_LOG_PATH, count, offset)
+        self.read_encrypted_lines(&self.events_path, count, offset)
     }
 
     /// Read audit logs with pagination
     pub fn read_audit(&self, count: usize, offset: usize) -> Result<Vec<LogEntry>> {
-        self.read_encrypted_lines(AUDIT_LOG_PATH, count, offset)
+        self.read_encrypted_lines(&self.audit_path, count, offset)
     }
-
 
     /// Clean up old security events
     pub fn cleanup_events(&self, retention_days: u32) -> Result<()> {
-        self.cleanup_old_entries(EVENTS_LOG_PATH, retention_days)
+        self.cleanup_old_entries(&self.events_path, retention_days)
     }
 
     /// Clean up old audit entries
     pub fn cleanup_audit(&self, retention_days: u32) -> Result<()> {
-        self.cleanup_old_entries(AUDIT_LOG_PATH, retention_days)
+        self.cleanup_old_entries(&self.audit_path, retention_days)
     }
 
     /// Get the maximum event ID currently in the log
     pub fn get_max_event_id(&self) -> u64 {
         // Read the last 50 events and find the max ID
-        self.read_events(50, 0).unwrap_or_default().iter().filter_map(|entry| {
-            if let LogEntry::SecurityEvent { id, .. } = entry {
-                Some(*id)
-            } else {
-                None
-            }
-        }).max().unwrap_or(0)
+        self.read_events(50, 0)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|entry| {
+                if let LogEntry::SecurityEvent { id, .. } = entry {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+            .max()
+            .unwrap_or(0)
     }
 
     // Private helper methods
 
     fn write_encrypted_line(&self, file: &mut File, entry: &LogEntry) -> Result<()> {
         // Get current timestamp
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_secs();
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
 
         // Generate unique nonce (8 bytes timestamp + 4 bytes random)
         let mut nonce_bytes = [0u8; 12];
@@ -183,12 +192,11 @@ impl EncryptedLogger {
         rand::thread_rng().fill_bytes(&mut nonce_bytes[8..]);
 
         // Serialize entry to JSON
-        let json = serde_json::to_string(entry)
-            .context("Failed to serialize log entry")?;
+        let json = serde_json::to_string(entry).context("Failed to serialize log entry")?;
 
         // Encrypt
-        let cipher = Aes256Gcm::new_from_slice(&self.key)
-            .map_err(|_| anyhow!("Invalid encryption key"))?;
+        let cipher =
+            Aes256Gcm::new_from_slice(&self.key).map_err(|_| anyhow!("Invalid encryption key"))?;
         let nonce = Nonce::from_slice(&nonce_bytes);
         let ciphertext = cipher
             .encrypt(nonce, json.as_bytes())
@@ -214,45 +222,41 @@ impl EncryptedLogger {
             bail!("Invalid log line format");
         }
 
-        let _timestamp = parts[0]
-            .parse::<u64>()
-            .context("Invalid timestamp")?;
-        let nonce_bytes = hex::decode(parts[1])
-            .context("Invalid nonce hex")?;
-        let ciphertext = hex::decode(parts[2])
-            .context("Invalid ciphertext hex")?;
+        let _timestamp = parts[0].parse::<u64>().context("Invalid timestamp")?;
+        let nonce_bytes = hex::decode(parts[1]).context("Invalid nonce hex")?;
+        let ciphertext = hex::decode(parts[2]).context("Invalid ciphertext hex")?;
 
         // Decrypt
-        let cipher = Aes256Gcm::new_from_slice(&self.key)
-            .map_err(|_| anyhow!("Invalid encryption key"))?;
+        let cipher =
+            Aes256Gcm::new_from_slice(&self.key).map_err(|_| anyhow!("Invalid encryption key"))?;
         let nonce = Nonce::from_slice(&nonce_bytes);
         let plaintext = cipher
             .decrypt(nonce, ciphertext.as_ref())
             .map_err(|_| anyhow!("Decryption failed"))?;
 
-        let json = String::from_utf8(plaintext)
-            .context("Invalid UTF-8 in decrypted data")?;
-        let entry: LogEntry = serde_json::from_str(&json)
-            .context("Failed to parse log entry JSON")?;
+        let json = String::from_utf8(plaintext).context("Invalid UTF-8 in decrypted data")?;
+        let entry: LogEntry =
+            serde_json::from_str(&json).context("Failed to parse log entry JSON")?;
 
         Ok(entry)
     }
 
-    fn read_encrypted_lines(&self, path: &str, count: usize, offset: usize) -> Result<Vec<LogEntry>> {
+    fn read_encrypted_lines(
+        &self,
+        path: &str,
+        count: usize,
+        offset: usize,
+    ) -> Result<Vec<LogEntry>> {
         if !Path::new(path).exists() {
             return Ok(vec![]);
         }
 
-        let file = File::open(path)
-            .context("Failed to open log file")?;
+        let file = File::open(path).context("Failed to open log file")?;
         let reader = BufReader::new(file);
 
         // For now, we still read into memory but support pagination properly
         // In a future optimization, we can use reverse seeking to avoid loading everything
-        let lines: Vec<String> = reader
-            .lines()
-            .filter_map(|l| l.ok())
-            .collect();
+        let lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
 
         let mut entries = Vec::new();
         // Skip 'offset' lines from the end, then take 'count' lines
@@ -272,9 +276,7 @@ impl EncryptedLogger {
             return Ok(());
         }
 
-        let cutoff = SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_secs()
+        let cutoff = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs()
             - (retention_days as u64 * 86400);
 
         let file = File::open(path)?;

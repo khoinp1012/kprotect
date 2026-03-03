@@ -146,7 +146,7 @@ export function Notifications() {
                 <div className="flex items-center space-x-3">
                     <div className="flex items-center space-x-3 bg-white border border-zinc-200 px-4 py-2.5 rounded-xl shadow-sm">
                         <AlertTriangle size={18} className={blockedAlertsEnabled ? "text-rose-600" : "text-zinc-400"} />
-                        <span className="text-sm font-bold text-zinc-700 tracking-tight">Desktop Blocked</span>
+                        <span className="text-sm font-bold text-zinc-700 tracking-tight">Protection Blocked</span>
                         <button
                             onClick={() => setBlockedAlertsEnabled(!blockedAlertsEnabled)}
                             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${blockedAlertsEnabled ? 'bg-rose-600' : 'bg-zinc-300'}`}
@@ -157,7 +157,7 @@ export function Notifications() {
 
                     <div className="flex items-center space-x-3 bg-white border border-zinc-200 px-4 py-2.5 rounded-xl shadow-sm">
                         <ShieldCheck size={18} className={authorizedAlertsEnabled ? "text-emerald-600" : "text-zinc-400"} />
-                        <span className="text-sm font-bold text-zinc-700 tracking-tight">Desktop Verified</span>
+                        <span className="text-sm font-bold text-zinc-700 tracking-tight">Protection Verified</span>
                         <button
                             onClick={() => setAuthorizedAlertsEnabled(!authorizedAlertsEnabled)}
                             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${authorizedAlertsEnabled ? 'bg-emerald-600' : 'bg-zinc-300'}`}

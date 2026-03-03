@@ -25,6 +25,7 @@ nix = { version = "0.29", features = ["fs", "mount", "sched", "socket", "user"] 
 libc = "0.2"
 reqwest = { version = "0.11", features = ["json"] }
 dashmap = "5.5"
+sd-notify = "0.4.1"
 
 # Encryption dependencies
 aes-gcm = "0.10"
@@ -44,10 +45,12 @@ priority = "optional"
 assets = [
     ["../target/release/kprotect", "usr/bin/kprotect-daemon", "755"],
     ["../target/release/kprotect-cli", "usr/bin/kprotect-cli", "755"],
+    ["../target/release/libkprotect_pam.so", "lib/x86_64-linux-gnu/security/pam_kprotect.so", "644"],
     ["../scripts/kprotect.service", "lib/systemd/system/kprotect.service", "644"],
 ]
 maintainer-scripts = "debian/"
 # conf-files removed as /etc/kprotect is unused
 systemd-units = { unit-name = "kprotect", enable = true, start = true }
 
-[build-dependencies]
+[dev-dependencies]
+tempfile = "3.8"

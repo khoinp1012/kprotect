@@ -49,8 +49,10 @@ fn build_ebpf(release: bool) -> Result<()> {
 
     let profile = if release { "release" } else { "debug" };
     println!("\n✓ eBPF program built successfully!");
-    println!("  Output: kprotect-ebpf/target/bpfel-unknown-none/{}/libkprotect_ebpf.so", profile);
+    println!(
+        "  Output: kprotect-ebpf/target/bpfel-unknown-none/{}/libkprotect_ebpf.so",
+        profile
+    );
 
     Ok(())
 }
-

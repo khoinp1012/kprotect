@@ -19,6 +19,14 @@ if [ "$1" = "configure" ]; then
     systemctl enable kprotect || true
     systemctl restart kprotect || true
 
+    # Register in /etc/pam.d/sudo
+    if [ -f "/etc/pam.d/sudo" ]; then
+        if ! grep -q "pam_kprotect.so" /etc/pam.d/sudo; then
+            echo "Registering kprotect in /etc/pam.d/sudo..."
+            sed -i '2i auth sufficient pam_kprotect.so' /etc/pam.d/sudo
+        fi
+    fi
+
     echo ""
     echo "================================================================================"
     echo " IMPORTANT: Please RESTART YOUR COMPUTER before authorizing any chain."

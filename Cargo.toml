@@ -10,7 +10,7 @@ exclude = [
     "gui_automation_test",
 ]
 [workspace.package]
-version = "0.1.0-beta"
+version = "0.2.0-beta"
 edition = "2021"
 authors = ["khoinp1012"]
 license = "AGPL-3.0-or-later"

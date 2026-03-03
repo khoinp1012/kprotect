@@ -1,9 +1,9 @@
-pub mod crypto;
-pub mod migration;
 pub mod config;
-pub mod logger;
-pub mod notifications;
-pub mod state;
 pub mod core;
+pub mod crypto;
 pub mod ebpf;
+pub mod logger;
+pub mod migration;
+pub mod notifications;
 pub mod server;
+pub mod state;

@@ -5,34 +5,35 @@
 ## Overview
 kprotect is a kernel-level security engine designed to protect your sensitive data from supply-chain attacks (like malicious Python or Node.js libraries). It stands as an independent security layer for the most sensitive files.
 
-- **eBPF-LSM Protection**: Intercepts file access at the kernel level based on path patterns and wildcards (e.g., `*.env`, `home/user/.ssh/*`).
-- **Chain of Trust**: Instead of trusting just a binary, kprotect validates the **process lineage**. 
-    - ✅ `VS Code` → `Terminal` → `cat` (If you authorized this chain)
-    - ❌ `VS Code` → `Terminal` → `python unsafe.py` → `cat` (This cannot read your file because the chain is invalid)
-- **Testing Ready**: Includes a robust system daemon, a power-user CLI, and a modern desktop GUI. All functions implemented.
+- **eBPF-LSM Enforcement**: Intercepts file access at the kernel level based on path patterns and wildcards (e.g., `*.env`, `home/user/.ssh/*`).
+- **Lineage Verification**: Validates the **process chain** rather than just a single binary. 
+    - ✅ `VS Code` → `Terminal` → `cat` (Authorized chain)
+    - ❌ `VS Code` → `Terminal` → `python script.py` → `cat` (Unauthorized chain blocked)
+- **Comprehensive Interface**: Includes a system daemon, a CLI tool, and a desktop GUI.
 
 ---
 
-## 💎 Technical Gems (Engineering Excellence)
+## Core Technologies
 
-kprotect is not just a security tool; it's a demonstration of high-performance systems engineering:
+kprotect is built around modern systems programming concepts:
 
--   **Memory Safety at the Core**: Built entirely in **Rust** (Backend) and **eBPF-LSM** (Kernel hooks), achieving C-level performance with modern safety guarantees.
--   **Zero-Overhead Enforcement**: Uses **BPF LSM** hooks for near-native performance. Benchmarks show negligible latency impact even under heavy file I/O.
--   **Post-Quantum Ready Hashing**: Implements a high-entropy **FNV-1a** lineage hashing algorithm, ensuring deterministic and secure process signatures.
--   **Machine-Bound Cryptography**: State and logs are protected by **AES-256-GCM**, with keys derived using **HKDF-SHA256** bound to the local hardware (`/etc/machine-id`).
--   **Advanced Interpreter Awareness**: Features a custom "Enrichment" engine that distinguishes between scripts (`python exploit.py` vs `python tool.py`), a common blind spot for traditional LSMs.
+-   **Memory Safety**: The backend daemon is written in **Rust**, with kernel hooks utilizing **eBPF-LSM**.
+-   **Low Overhead**: Utilizing **BPF LSM** hooks prevents the latency associated with traditional userspace context switching. Micro-benchmarks show minimal impact: **+12.8 µs per process spawn** and **+0.53 µs per file open**.
+-   **Process Hashing**: Implements **FNV-1a** for fast, deterministic hashing of process lineage chains in kernel space.
+-   **Encrypted Storage**: State and logs are encrypted using **AES-256-GCM**, with keys derived via **HKDF-SHA256** bound to the local machine (`/etc/machine-id`).
+-   **Script Awareness**: Features an enrichment engine that parses arguments for interpreters (`python exploit.py` vs `python tool.py`).
+-   **Lineage-Based Sudo (Quick Sudo)**: A custom PAM module provides passwordless elevation restricted by specific process chains.
 
 
 
-## 🚀 Key Innovation: The Chain of Trust
+## Execution Lineage concept
 
-Traditional security tools often look at *what* a file is. kprotect looks at *where it came from*.
+Rather than validating individual files, kprotect validates the execution pathway:
 
-1.  **Lineage Tracking**: Every process is assigned a unique signature derived from its parent's signature and its own executable path.
-2.  **Cryptographic Signatures**: Signatures are computed using FNV-1a hashing in kernel space, creating a provable "Chain of Trust" from the init process down to the leaf.
-3.  **Red Zones**: Sensitive locations (e.g., `~/.ssh/id_rsa`, `.env` files, browser cookies) are marked as "Red Zones".
-4.  **Zero-Trust Access**: Even a root process is **blocked** from accessing a Red Zone unless its specific execution lineage (signature) has been explicitly authorized.
+1.  **Lineage Tracking**: Every process has a unique signature derived from its parent's signature and its own executable path.
+2.  **Kernel-Space Hashing**: Signatures are computed using FNV-1a hashing in kernel space, creating a chain from the init process down to the leaf.
+3.  **Red Zones**: Sensitive locations (e.g., `~/.ssh/id_rsa`, `.env` files, browser cookies) are designated as protected paths.
+4.  **Least Privilege**: Access to Red Zones by root processes is blocked unless their specific execution lineage has been explicitly authorized.
 
 ---
 
@@ -51,6 +52,7 @@ Traditional security tools often look at *what* a file is. kprotect looks at *wh
     -   **kprotect-gui**: A modern, sleek desktop application built with Tauri and React.
         ![Authorized Patterns](screenshots/allowlist.png)
 -   **Dynamic Enrichment**: Captures process arguments for interpreters (Python, Node, Bash) to distinguish between `python safe_script.py` and `python malicious_script.py`.
+-   **Quick Sudo (Lineage-Auth)**: Configure complex lineage chains (e.g. `VS Code → Terminal → deploy.sh`) to automatically bypass `sudo` password prompts securely without using broad `NOPASSWD` rules in `/etc/sudoers`.
 
 ---
 
@@ -95,7 +97,7 @@ kprotect consists of two main components that should be installed in order:
 Install the daemon first to enable kernel-level protection:
 ```bash
 # Install the core debian package
-sudo apt install ./target/kprotect_0.1.0-beta-1_amd64.deb
+sudo apt install ./target/kprotect_0.2.0-beta-1_amd64.deb
 ```
 *The installer will automatically set up the systemd service.*
 
@@ -103,7 +105,7 @@ sudo apt install ./target/kprotect_0.1.0-beta-1_amd64.deb
 Install the GUI for a visual management experience:
 ```bash
 # Install the GUI package
-sudo apt install ./kprotect-ui/src-tauri/target/release/bundle/deb/kprotect-ui_0.1.0-beta_amd64.deb
+sudo apt install ./kprotect-ui/src-tauri/target/release/bundle/deb/kprotect-ui_0.2.0-beta_amd64.deb
 ```
 
 ### ⚠️ IMPORTANT: Post-Installation

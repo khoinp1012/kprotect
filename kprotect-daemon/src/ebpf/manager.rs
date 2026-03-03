@@ -1,15 +1,20 @@
 use anyhow::{Context, Result};
-use aya::{Ebpf, EbpfLoader};
 use aya::programs::Lsm;
+use aya::{Ebpf, EbpfLoader};
 use log::info;
 
 /// Load eBPF programs and attach LSM hooks
 pub fn load_ebpf() -> Result<Ebpf> {
     // Embed the bytecode at compile time
     // Path is relative to this file (src/ebpf/manager.rs) -> ../../../kprotect-ebpf/...
-    let ebpf_bytes = include_bytes!("../../../kprotect-ebpf/target/bpfel-unknown-none/release/libkprotect_ebpf.so");
+    let ebpf_bytes = include_bytes!(
+        "../../../kprotect-ebpf/target/bpfel-unknown-none/release/libkprotect_ebpf.so"
+    );
     info!("eBPF Bytes Length: {}", ebpf_bytes.len());
-    info!("eBPF Header: {:02x} {:02x} {:02x} {:02x}", ebpf_bytes[0], ebpf_bytes[1], ebpf_bytes[2], ebpf_bytes[3]);
+    info!(
+        "eBPF Header: {:02x} {:02x} {:02x} {:02x}",
+        ebpf_bytes[0], ebpf_bytes[1], ebpf_bytes[2], ebpf_bytes[3]
+    );
 
     // COPY to aligned buffer (heap) to prevent "error parsing ELF data" due to alignment issues
     let ebpf_bytes_aligned = ebpf_bytes.to_vec();

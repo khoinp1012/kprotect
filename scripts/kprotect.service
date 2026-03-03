@@ -5,7 +5,8 @@ DefaultDependencies=no
 # Start after essential filesystems and BPF are available
 After=local-fs.target systemd-sysctl.service
 # Start before user sessions and network services to monitor all activity
-Before=systemd-user-sessions.service user@.service network-pre.target
+# Start before user sessions and network services to monitor all activity
+Before=systemd-user-sessions.service user@.service network-pre.target display-manager.service basic.target
 # Ensure we start before any services we want to monitor
 Before=docker.service containerd.service
 Wants=local-fs.target
@@ -13,7 +14,10 @@ Wants=local-fs.target
 Requires=local-fs.target
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=all
+# Ensure we don't block boot indefinitely if daemon hangs
+TimeoutStartSec=15s
 ExecStart=/usr/bin/kprotect-daemon daemon
 Restart=always
 RestartSec=5

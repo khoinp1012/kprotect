@@ -1,4 +1,5 @@
 #!/bin/bash
+
 set -e
 
 # --- Configuration & Colors ---
@@ -58,7 +59,61 @@ if grep -q "bpf" /sys/kernel/security/lsm 2>/dev/null; then
     echo -e "${GREEN}OK${NC}"
 else
     echo -e "${RED}FAILED${NC}"
-    error "BPF LSM is not enabled in your kernel. Verify boot parameters (lsm=...,bpf)."
+    warn "BPF LSM is NOT enabled. kprotect requires it to function."
+    
+    # Suggest GRUB fix
+    if [ -f "/etc/default/grub" ]; then
+        info "Generating recovery command..."
+        # Extract current GRUB parameters more robustly
+        LINE=$(grep "^GRUB_CMDLINE_LINUX_DEFAULT=" /etc/default/grub)
+        # Extract everything between the first set of quotes (single or double)
+        CURRENT_PARAMS=$(echo "$LINE" | sed -E "s/GRUB_CMDLINE_LINUX_DEFAULT=['\"](.*)['\"]/\1/")
+        
+        # If extraction failed (e.g. no quotes), fallback to empty
+        if [ "$CURRENT_PARAMS" == "$LINE" ]; then
+            CURRENT_PARAMS=""
+        fi
+
+        # Refine parameters: remove existing lsm= member and append new one at the end
+        NEW_PARAMS=$(echo "$CURRENT_PARAMS" | sed -E 's/lsm=[^ "]*//')
+        NEW_PARAMS="$NEW_PARAMS lsm=lockdown,capability,landlock,yama,apparmor,bpf"
+        
+        # Clean up double spaces and leading/trailing whitespace
+        NEW_PARAMS=$(echo "$NEW_PARAMS" | sed 's/  */ /g' | sed 's/^ //;s/ $//')
+
+        # Detect boot mode
+        BOOT_MODE="BIOS"
+        [ -d /sys/firmware/efi ] && BOOT_MODE="UEFI"
+        info "Detected boot mode: $BOOT_MODE"
+
+        # Detect GRUB update command
+        GRUB_UPDATE_CMD=""
+        if command -v update-grub &> /dev/null; then
+            GRUB_UPDATE_CMD="update-grub"
+        elif command -v update-grub2 &> /dev/null; then
+            GRUB_UPDATE_CMD="update-grub2"
+        elif command -v grub-mkconfig &> /dev/null; then
+            # Try to find config path
+            GRUB_CFG_PATH="/boot/grub/grub.cfg"
+            [ -f "/boot/efi/EFI/ubuntu/grub.cfg" ] && GRUB_CFG_PATH="/boot/efi/EFI/ubuntu/grub.cfg"
+            GRUB_UPDATE_CMD="grub-mkconfig -o $GRUB_CFG_PATH"
+        fi
+
+        echo ""
+        echo -e "${YELLOW}Run this command and then RESTART YOUR COMPUTER:${NC}"
+        echo "--------------------------------------------------------------------------------"
+        if [ -n "$GRUB_UPDATE_CMD" ]; then
+            echo "sudo sed -i -E \"s/GRUB_CMDLINE_LINUX_DEFAULT=(['\\\"])(.*)(['\\\"])/GRUB_CMDLINE_LINUX_DEFAULT=\\1\\2 lsm=lockdown,capability,landlock,yama,apparmor,bpf\\3/\" /etc/default/grub && sudo $GRUB_UPDATE_CMD"
+        else
+            echo "1. Edit /etc/default/grub"
+            echo "2. Add 'lsm=lockdown,capability,landlock,yama,apparmor,bpf' to GRUB_CMDLINE_LINUX_DEFAULT"
+            echo "3. Run your system's GRUB update command and reboot."
+        fi
+        echo "--------------------------------------------------------------------------------"
+        echo ""
+    fi
+    
+    error "BPF LSM is not enabled. Please run the command above and reboot."
 fi
 
 # --- Installation Steps ---
@@ -92,6 +147,21 @@ if [ -f "target/release/libkprotect_pam.so" ]; then
             success "Installed to $dir/pam_kprotect.so"
         fi
     done
+
+    # Register in /etc/pam.d/sudo
+    if [ -f "/etc/pam.d/sudo" ]; then
+        if ! grep -q "pam_kprotect.so" /etc/pam.d/sudo; then
+            info "Registering kprotect in /etc/pam.d/sudo..."
+            # Insert at the top (after the first line or directly at top)
+            # Using sed to insert at the 2nd line to avoid replacing the header
+            sed -i '2i auth sufficient pam_kprotect.so' /etc/pam.d/sudo
+            success "Registered Quick Sudo bypass in /etc/pam.d/sudo"
+        else
+            info "kprotect already registered in /etc/pam.d/sudo"
+        fi
+    else
+        warn "/etc/pam.d/sudo not found. Quick Sudo bypass must be configured manually."
+    fi
 fi
 
 

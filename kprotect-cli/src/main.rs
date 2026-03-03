@@ -36,6 +36,9 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use colored::*;
 use kprotect_client::KprotectClient;
+use std::fs::File;
+use std::io::{Read, Write};
+use std::time::{SystemTime, UNIX_EPOCH};
 // use tabled::{Table, Tabled, settings::Style};
 
 #[derive(Parser)]
@@ -60,25 +63,25 @@ struct Cli {
 enum Commands {
     /// Ping the daemon
     Ping,
-    
+
     /// Show daemon version
     Version,
-    
+
     /// Show daemon capabilities
     Capabilities,
-    
+
     /// Manage authorization patterns
     Authorize {
         #[command(subcommand)]
         action: AuthorizeAction,
     },
-    
+
     /// Manage zones (red/green)
     Zone {
         #[command(subcommand)]
         action: ZoneAction,
     },
-    
+
     /// Manage enrichment patterns
     Pattern {
         #[command(subcommand)]
@@ -103,7 +106,7 @@ enum Commands {
         /// Number of events to retrieve (ignored if --stream is used)
         #[arg(short, long, default_value = "50")]
         count: usize,
-        
+
         /// Stream live events
         #[arg(short, long)]
         stream: bool,
@@ -126,7 +129,7 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    
+
     /// Manage notification rules
     Notify {
         #[command(subcommand)]
@@ -135,6 +138,12 @@ enum Commands {
 
     /// Start interactive mode (reads commands from stdin)
     Interactive,
+
+    /// Manage system configuration
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
 
     /// Manage sudo privilege rules
     Sudo {
@@ -150,7 +159,7 @@ enum SudoAction {
         /// Comma-separated process lineage (e.g. "/usr/bin/bash,/usr/bin/cat")
         #[arg(short, long)]
         pattern: String,
-        
+
         /// Description of the rule
         #[arg(short, long)]
         description: String,
@@ -177,18 +186,17 @@ enum SudoAction {
     },
 }
 
-
 #[derive(Subcommand)]
 enum AuthorizeAction {
     /// Add an authorization pattern
     Add {
         /// Comma-separated list of process paths (e.g. "/usr/bin/bash,/usr/bin/cat")
         pattern: String,
-        
+
         /// Match mode (Exact or Suffix)
         #[arg(short, long, default_value = "Suffix")]
         mode: String,
-        
+
         /// Optional description
         #[arg(short, long)]
         description: Option<String>,
@@ -198,7 +206,7 @@ enum AuthorizeAction {
         /// Pattern to remove (comma-separated for multi-part patterns)
         #[arg(value_delimiter = ',')]
         pattern: Vec<String>,
-        
+
         /// Match mode: 'exact' or 'suffix'
         #[arg(short, long, default_value = "suffix")]
         mode: String,
@@ -217,7 +225,7 @@ enum AuthorizeAction {
 enum ZoneAction {
     /// Add a zone pattern
     Add {
-        /// Zone type (red or green)  
+        /// Zone type (red or green)
         zone_type: String,
         /// Pattern (e.g. *.secret)
         pattern: String,
@@ -258,6 +266,40 @@ enum PatternAction {
 }
 
 #[derive(Subcommand)]
+pub enum ConfigAction {
+    /// Enable or disable the protection engine
+    Engine {
+        /// Enabled status (true/false)
+        enabled: bool,
+    },
+    /// Enable or disable file protection
+    FileProtection {
+        /// Enabled status (true/false)
+        enabled: bool,
+    },
+    /// Enable or disable sudo bypass for authorized lineages
+    SudoBypass {
+        /// Enabled status (true/false)
+        enabled: bool,
+    },
+    /// Export all configurations to a JSON file
+    Export {
+        /// Output file path (defaults to stdout)
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+    /// Import configurations from a JSON file
+    Import {
+        /// Input file path
+        #[arg(short, long)]
+        input: String,
+        /// Overwrite existing rules (defaults to merge)
+        #[arg(short, long)]
+        overwrite: bool,
+    },
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Subcommand)]
 pub enum NotifyAction {
     /// Add a notification rule
     Add {
@@ -320,47 +362,60 @@ async fn main() -> Result<()> {
             let response = client.ping().await?;
             println!("{} {}", "✓".green().bold(), response.bright_green());
         }
-        
+
         Commands::Version => {
             let response = client.version().await?;
             println!("{} {}", "ℹ".blue().bold(), response.cyan());
         }
-        
+
         Commands::Capabilities => {
             let caps = client.capabilities().await?;
             println!("\n{}", "═".repeat(50).bright_cyan());
-            println!("{}",  "      kprotect Daemon Capabilities".bright_cyan().bold());
+            println!(
+                "{}",
+                "      kprotect Daemon Capabilities".bright_cyan().bold()
+            );
             println!("{}\n", "═".repeat(50).bright_cyan());
-            
-            println!("{} Version: {}  {} Protocol: {}", 
+
+            println!(
+                "{} Version: {}  {} Protocol: {}",
                 "📦",
                 caps.version.cyan(),
                 "🔌",
                 caps.protocol_version.cyan()
             );
-            
+
             println!("\n{} Features:", "✨".bold());
             for feat in &caps.features {
                 println!("  {} {}", "✓".green(), feat);
             }
             println!();
         }
-        
+
         Commands::Authorize { action } => {
             match action {
-                AuthorizeAction::Add { pattern, mode, description } => {
-                    let pattern_list: Vec<String> = pattern.split(',')
-                        .map(|s| s.trim().to_string())
-                        .collect();
-                        
+                AuthorizeAction::Add {
+                    pattern,
+                    mode,
+                    description,
+                } => {
+                    let pattern_list: Vec<String> =
+                        pattern.split(',').map(|s| s.trim().to_string()).collect();
+
                     let match_mode = match mode.to_lowercase().as_str() {
                         "exact" => kprotect_client::MatchMode::Exact,
                         "suffix" => kprotect_client::MatchMode::Suffix,
                         _ => anyhow::bail!("Invalid match mode. Use 'Exact' or 'Suffix'"),
                     };
-                    
-                    client.authorize_pattern(&pattern_list, match_mode, description.as_deref()).await?;
-                    println!("\n{} {}", "✅", "Pattern authorized successfully".green().bold());
+
+                    client
+                        .authorize_pattern(&pattern_list, match_mode, description.as_deref())
+                        .await?;
+                    println!(
+                        "\n{} {}",
+                        "✅",
+                        "Pattern authorized successfully".green().bold()
+                    );
                     println!("   {} {}", "Pattern:".dimmed(), pattern.cyan());
                     println!("   {} {}", "Mode:".dimmed(), mode.cyan());
                     if let Some(desc) = description {
@@ -368,7 +423,7 @@ async fn main() -> Result<()> {
                     }
                     println!();
                 }
-                
+
                 AuthorizeAction::Remove { pattern, mode } => {
                     let match_mode = match mode.to_lowercase().as_str() {
                         "exact" => kprotect_common::MatchMode::Exact,
@@ -378,14 +433,18 @@ async fn main() -> Result<()> {
                             std::process::exit(1);
                         }
                     };
-                    
+
                     client.revoke_pattern(pattern.clone(), match_mode).await?;
-                    println!("\n{} {}", "🗑️", "Pattern revoked successfully".yellow().bold());
+                    println!(
+                        "\n{} {}",
+                        "🗑️",
+                        "Pattern revoked successfully".yellow().bold()
+                    );
                     println!("   {} {}", "Pattern:".dimmed(), pattern.join(" → ").cyan());
                     println!("   {} {}", "Mode:".dimmed(), mode.cyan());
                     println!();
                 }
-                
+
                 AuthorizeAction::List { json } => {
                     let patterns = client.get_patterns().await?;
                     if json {
@@ -396,35 +455,45 @@ async fn main() -> Result<()> {
                         println!("\n{} Authorized Patterns:", "📋".bold());
                         for (idx, p) in patterns.iter().enumerate() {
                             println!("\n  {} Pattern #{}", "→".cyan(), idx + 1);
-                            println!("    {} {}", "Chain:".dimmed(), p.pattern.join(" → ").yellow());
+                            println!(
+                                "    {} {}",
+                                "Chain:".dimmed(),
+                                p.pattern.join(" → ").yellow()
+                            );
                             println!("    {} {:?}", "Mode:".dimmed(), p.match_mode);
                             println!("    {} {}", "Description:".dimmed(), p.description.cyan());
-                            println!("    {} {}", "Authorized:".dimmed(), 
+                            println!(
+                                "    {} {}",
+                                "Authorized:".dimmed(),
                                 format!("{} (Unix timestamp)", p.authorized_at)
                             );
                         }
                         println!();
                     }
                 }
-                
+
                 AuthorizeAction::Clear => {
                     // Send CLEAR command to daemon
                     let _ = client.ping().await; // Placeholder check
-                    // For now, just inform user to use daemon command
+                                                 // For now, just inform user to use daemon command
                     println!("\n{} {}", "⚠".yellow(), "Clear all authorizations?".bold());
                     println!("   This will remove ALL authorized patterns.");
                     println!("   Type 'yes' to confirm:");
-                    
+
                     use std::io::{self, BufRead};
                     let stdin = io::stdin();
                     let mut line = String::new();
                     stdin.lock().read_line(&mut line)?;
-                    
+
                     if line.trim().to_lowercase() == "yes" {
-                        println!("{} {}", "✓".green(), "Sending CLEAR command to daemon...".dimmed());
+                        println!(
+                            "{} {}",
+                            "✓".green(),
+                            "Sending CLEAR command to daemon...".dimmed()
+                        );
                         // Temporary: send via socket directly
-                        use tokio::net::UnixStream;
                         use tokio::io::AsyncWriteExt;
+                        use tokio::net::UnixStream;
                         let mut stream = UnixStream::connect(&socket_path).await?;
                         stream.write_all(b"CLEAR\n").await?;
                         println!("{} {}", "✓".green().bold(), "All patterns cleared".green());
@@ -434,112 +503,133 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        
-        Commands::Zone { action } => {
-            match action {
-                ZoneAction::Add { zone_type, pattern } => {
-                    client.add_zone(&zone_type, &pattern).await?;
-                    println!("{} Added {} zone: {}", 
-                        "✓".green().bold(),
-                        zone_type.cyan(),
-                        pattern.yellow()
-                    );
+
+        Commands::Zone { action } => match action {
+            ZoneAction::Add { zone_type, pattern } => {
+                client.add_zone(&zone_type, &pattern).await?;
+                println!(
+                    "{} Added {} zone: {}",
+                    "✓".green().bold(),
+                    zone_type.cyan(),
+                    pattern.yellow()
+                );
+            }
+            ZoneAction::Remove { zone_type, pattern } => {
+                client.remove_zone(&zone_type, &pattern).await?;
+                println!(
+                    "{} Removed {} zone: {}",
+                    "✓".green().bold(),
+                    zone_type.cyan(),
+                    pattern.yellow()
+                );
+            }
+            ZoneAction::List { json } => {
+                if unsafe { libc::getuid() } != 0 {
+                    anyhow::bail!("This command requires root privileges (use sudo)");
                 }
-                ZoneAction::Remove { zone_type, pattern } => {
-                    client.remove_zone(&zone_type, &pattern).await?;
-                    println!("{} Removed {} zone: {}", 
-                        "✓".green().bold(),
-                        zone_type.cyan(),
-                        pattern.yellow()
-                    );
-                }
-                ZoneAction::List { json } => {
-                    if unsafe { libc::getuid() } != 0 {
-                        anyhow::bail!("This command requires root privileges (use sudo)");
+                let zones = client.list_zones().await?;
+
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&zones)?);
+                } else {
+                    println!("\n{} {}", "🔴", "Red Zones:".red().bold());
+                    for (i, pattern) in zones.red_zones.iter().enumerate() {
+                        println!("  {}. {}", (i + 1).to_string().dimmed(), pattern.yellow());
                     }
-                    let zones = client.list_zones().await?;
-                    
-                    if json {
-                        println!("{}", serde_json::to_string_pretty(&zones)?);
+
+                    println!("\n{} {}", "🟢", "Green Zones:".green().bold());
+                    if zones.green_zones.is_empty() {
+                        println!("  {}", "(none)".dimmed());
                     } else {
-                        println!("\n{} {}", "🔴", "Red Zones:".red().bold());
-                        for (i, pattern) in zones.red_zones.iter().enumerate() {
-                            println!("  {}. {}", (i + 1).to_string().dimmed(), pattern.yellow());
+                        for (i, pattern) in zones.green_zones.iter().enumerate() {
+                            println!("  {}. {}", (i + 1).to_string().dimmed(), pattern.cyan());
                         }
-                        
-                        println!("\n{} {}", "🟢", "Green Zones:".green().bold());
-                        if zones.green_zones.is_empty() {
-                            println!("  {}", "(none)".dimmed());
-                        } else {
-                            for (i, pattern) in zones.green_zones.iter().enumerate() {
-                                println!("  {}. {}", (i + 1).to_string().dimmed(), pattern.cyan());
-                            }
-                        }
-                        println!();
                     }
+                    println!();
                 }
             }
-        }
-        
-        Commands::Pattern { action } => {
-            match action {
-                PatternAction::Add { pattern } => {
-                    client.add_enrichment_pattern(&pattern).await?;
-                    println!("{} Added pattern: {}", 
-                        "✓".green().bold(),
-                        pattern.yellow()
-                    );
+        },
+
+        Commands::Pattern { action } => match action {
+            PatternAction::Add { pattern } => {
+                client.add_enrichment_pattern(&pattern).await?;
+                println!("{} Added pattern: {}", "✓".green().bold(), pattern.yellow());
+            }
+            PatternAction::Remove { pattern } => {
+                client.remove_enrichment_pattern(&pattern).await?;
+                println!(
+                    "{} Removed pattern: {}",
+                    "✓".green().bold(),
+                    pattern.yellow()
+                );
+            }
+            PatternAction::List { json } => {
+                if unsafe { libc::getuid() } != 0 {
+                    anyhow::bail!("This command requires root privileges (use sudo)");
                 }
-                PatternAction::Remove { pattern } => {
-                    client.remove_enrichment_pattern(&pattern).await?;
-                    println!("{} Removed pattern: {}", 
-                        "✓".green().bold(),
-                        pattern.yellow()
-                    );
-                }
-                PatternAction::List { json } => {
-                    if unsafe { libc::getuid() } != 0 {
-                        anyhow::bail!("This command requires root privileges (use sudo)");
+                let config = client.list_enrichment_patterns().await?;
+
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&config)?);
+                } else {
+                    println!("\n{} {}", "🔧", "Enrichment Patterns:".cyan().bold());
+                    for (i, pattern) in config.enrichment_patterns.iter().enumerate() {
+                        println!("  {}. {}", (i + 1).to_string().dimmed(), pattern.yellow());
                     }
-                    let config = client.list_enrichment_patterns().await?;
-                    
-                    if json {
-                        println!("{}", serde_json::to_string_pretty(&config)?);
-                    } else {
-                        println!("\n{} {}", "🔧", "Enrichment Patterns:".cyan().bold());
-                        for (i, pattern) in config.enrichment_patterns.iter().enumerate() {
-                            println!("  {}. {}", (i + 1).to_string().dimmed(), pattern.yellow());
-                        }
-                        println!();
-                    }
+                    println!();
                 }
             }
-        }
+        },
 
         Commands::GetLogConfig => {
             let config = client.get_log_config().await?;
             println!("\n{} {}", "📝", "Log Configuration:".cyan().bold());
-            println!("   {} {} days", "Event Retention:".dimmed(), config.event_log_retention_days.to_string().yellow());
-            println!("   {} {} days", "Audit Retention:".dimmed(), config.audit_log_retention_days.to_string().yellow());
+            println!(
+                "   {} {} days",
+                "Event Retention:".dimmed(),
+                config.event_log_retention_days.to_string().yellow()
+            );
+            println!(
+                "   {} {} days",
+                "Audit Retention:".dimmed(),
+                config.audit_log_retention_days.to_string().yellow()
+            );
             println!();
         }
 
         Commands::SetLogRetention { events, audit } => {
             client.set_log_retention(events, audit).await?;
-            println!("\n{} {}", "✅", "Log retention updated successfully".green().bold());
-            println!("   {} {} days", "Events:".dimmed(), events.to_string().cyan());
+            println!(
+                "\n{} {}",
+                "✅",
+                "Log retention updated successfully".green().bold()
+            );
+            println!(
+                "   {} {} days",
+                "Events:".dimmed(),
+                events.to_string().cyan()
+            );
             println!("   {} {} days", "Audit:".dimmed(), audit.to_string().cyan());
             println!();
         }
 
-        Commands::Events { count, stream, json } => {
+        Commands::Events {
+            count,
+            stream,
+            json,
+        } => {
             if stream {
                 // Streaming mode - Direct socket connection
+                use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
                 use tokio::net::UnixStream;
-                use tokio::io::{AsyncBufReadExt, BufReader, AsyncWriteExt};
 
-                let mut socket = UnixStream::connect(&socket_path).await
-                    .map_err(|e| anyhow::anyhow!("Failed to connect to daemon socket at {}: {}", socket_path, e))?;
+                let mut socket = UnixStream::connect(&socket_path).await.map_err(|e| {
+                    anyhow::anyhow!(
+                        "Failed to connect to daemon socket at {}: {}",
+                        socket_path,
+                        e
+                    )
+                })?;
 
                 // Determine subscription command based on args (future proofing)
                 // For now, just basic SUBSCRIBE
@@ -566,7 +656,8 @@ async fn main() -> Result<()> {
                         match serde_json::from_str::<serde_json::Value>(&line) {
                             Ok(v) => {
                                 let time = v["timestamp"].as_u64().unwrap_or(0);
-                                let path = v["path"].as_str()
+                                let path = v["path"]
+                                    .as_str()
                                     .or_else(|| v["target"].as_str())
                                     .or_else(|| v["chain_str"].as_str())
                                     .unwrap_or("???");
@@ -576,7 +667,8 @@ async fn main() -> Result<()> {
                                     "Blocked" => status.red(),
                                     _ => status.white(),
                                 };
-                                println!("[{}] {} {}", 
+                                println!(
+                                    "[{}] {} {}",
                                     chrono::DateTime::from_timestamp(time as i64, 0)
                                         .unwrap_or_default()
                                         .format("%H:%M:%S")
@@ -598,7 +690,12 @@ async fn main() -> Result<()> {
                     let json_out = serde_json::to_string_pretty(&events)?;
                     println!("{}", json_out);
                 } else {
-                    println!("\n{} {} (showing last {})", "📜", "Security Events:".red().bold(), events.len());
+                    println!(
+                        "\n{} {} (showing last {})",
+                        "📜",
+                        "Security Events:".red().bold(),
+                        events.len()
+                    );
                     for e in events {
                         println!("{:?}", e);
                     }
@@ -609,7 +706,12 @@ async fn main() -> Result<()> {
 
         Commands::Audit { count } => {
             let logs = client.get_audit(count, 0).await?;
-            println!("\n{} {} (showing last {})", "🛡️", "Audit Logs:".blue().bold(), logs.len());
+            println!(
+                "\n{} {} (showing last {})",
+                "🛡️",
+                "Audit Logs:".blue().bold(),
+                logs.len()
+            );
             for log in logs {
                 println!("{:?}", log);
             }
@@ -631,30 +733,78 @@ async fn main() -> Result<()> {
                 println!("{}", serde_json::to_string(&wrapper)?);
             } else {
                 println!("\n{}", "═".repeat(60).bright_cyan());
-                println!("{}",  "            kprotect System Status".bright_cyan().bold());
+                println!(
+                    "{}",
+                    "            kprotect System Status".bright_cyan().bold()
+                );
                 println!("{}", "═".repeat(60).bright_cyan());
 
                 println!("\n{} {}", "🚀", "Daemon Status:".bold());
-                println!("   {} {}s", "Uptime:".dimmed(), status.uptime_seconds.to_string().cyan());
-                println!("   {} {}", "eBPF Loaded:".dimmed(), if status.ebpf_loaded { "Yes".green() } else { "No".red() });
-                println!("   {} {}", "Active Conns:".dimmed(), status.active_connections.to_string().yellow());
+                println!(
+                    "   {} {}s",
+                    "Uptime:".dimmed(),
+                    status.uptime_seconds.to_string().cyan()
+                );
+                println!(
+                    "   {} {}",
+                    "eBPF Loaded:".dimmed(),
+                    if status.ebpf_loaded {
+                        "Yes".green()
+                    } else {
+                        "No".red()
+                    }
+                );
+                println!(
+                    "   {} {}",
+                    "Active Conns:".dimmed(),
+                    status.active_connections.to_string().yellow()
+                );
                 println!("   {} {}", "Socket:".dimmed(), status.socket_path);
 
                 println!("\n{} {}", "🔒", "Security & Encryption:".bold());
-                println!("   {} {}", "Encryption:".dimmed(), if encryption.enabled { format!("Enabled ({})", encryption.algorithm).green() } else { "Disabled".red() });
-                println!("   {} {}", "Key Fingerprint:".dimmed(), encryption.key_fingerprint.cyan());
-                
+                println!(
+                    "   {} {}",
+                    "Encryption:".dimmed(),
+                    if encryption.enabled {
+                        format!("Enabled ({})", encryption.algorithm).green()
+                    } else {
+                        "Disabled".red()
+                    }
+                );
+                println!(
+                    "   {} {}",
+                    "Key Fingerprint:".dimmed(),
+                    encryption.key_fingerprint.cyan()
+                );
+
                 println!("\n{} {}", "📊", "Policy Statistics:".bold());
-                println!("   {} {}", "Authorized Patterns:".dimmed(), system.authorized_patterns.to_string().yellow());
-                println!("   {} {}", "Red Zones:".dimmed(), system.red_zones.to_string().yellow());
-                println!("   {} {}", "Enrichment Rules:".dimmed(), system.enrichment_patterns.to_string().yellow());
+                println!(
+                    "   {} {}",
+                    "Authorized Patterns:".dimmed(),
+                    system.authorized_patterns.to_string().yellow()
+                );
+                println!(
+                    "   {} {}",
+                    "Red Zones:".dimmed(),
+                    system.red_zones.to_string().yellow()
+                );
+                println!(
+                    "   {} {}",
+                    "Enrichment Rules:".dimmed(),
+                    system.enrichment_patterns.to_string().yellow()
+                );
 
                 println!("\n{} {}", "🧠", "eBPF Map Usage:".bold());
                 for (name, stats) in system.ebpf_maps {
-                    let usage = if stats.capacity > 0 { (stats.size as f32 / stats.capacity as f32) * 100.0 } else { 0.0 };
-                    println!("   {}: {}/{} ({:.1}%)", 
-                        name.dimmed(), 
-                        stats.size, 
+                    let usage = if stats.capacity > 0 {
+                        (stats.size as f32 / stats.capacity as f32) * 100.0
+                    } else {
+                        0.0
+                    };
+                    println!(
+                        "   {}: {}/{} ({:.1}%)",
+                        name.dimmed(),
+                        stats.size,
                         stats.capacity,
                         usage
                     );
@@ -665,8 +815,16 @@ async fn main() -> Result<()> {
 
         Commands::Notify { action } => {
             match action {
-                NotifyAction::Add { name, events, path, action, dest, timeout } => {
-                    let event_types: Vec<kprotect_common::EventTypeFilter> = events.split(',')
+                NotifyAction::Add {
+                    name,
+                    events,
+                    path,
+                    action,
+                    dest,
+                    timeout,
+                } => {
+                    let event_types: Vec<kprotect_common::EventTypeFilter> = events
+                        .split(',')
                         .map(|s| match s.trim() {
                             "Verified" => kprotect_common::EventTypeFilter::Verified,
                             "Blocked" => kprotect_common::EventTypeFilter::Blocked,
@@ -675,71 +833,117 @@ async fn main() -> Result<()> {
                             _ => panic!("Invalid event type: {}", s),
                         })
                         .collect();
-                    
+
                     let action_type = match action.to_lowercase().as_str() {
                         "script" => kprotect_common::ActionType::Script,
                         "webhook" => kprotect_common::ActionType::Webhook,
                         _ => anyhow::bail!("Invalid action type. Use 'Script' or 'Webhook'"),
                     };
 
-                    client.add_notification_rule(&name, &event_types, path.as_deref(), action_type, &dest, timeout).await?;
-                    println!("{} Added notification rule: {}", "✓".green().bold(), name.cyan());
+                    client
+                        .add_notification_rule(
+                            &name,
+                            &event_types,
+                            path.as_deref(),
+                            action_type,
+                            &dest,
+                            timeout,
+                        )
+                        .await?;
+                    println!(
+                        "{} Added notification rule: {}",
+                        "✓".green().bold(),
+                        name.cyan()
+                    );
                 }
                 NotifyAction::Remove { id } => {
                     client.remove_notification_rule(id).await?;
-                    println!("{} Removed notification rule ID: {}", "✓".green().bold(), id.to_string().yellow());
+                    println!(
+                        "{} Removed notification rule ID: {}",
+                        "✓".green().bold(),
+                        id.to_string().yellow()
+                    );
                 }
                 NotifyAction::Toggle { id, enabled } => {
                     client.toggle_notification_rule(id, enabled).await?;
-                    let status = if enabled { "enabled".green() } else { "disabled".red() };
-                    println!("{} Rule {} is now {}", "✓".green().bold(), id.to_string().yellow(), status);
+                    let status = if enabled {
+                        "enabled".green()
+                    } else {
+                        "disabled".red()
+                    };
+                    println!(
+                        "{} Rule {} is now {}",
+                        "✓".green().bold(),
+                        id.to_string().yellow(),
+                        status
+                    );
                 }
                 NotifyAction::List { json } => {
                     let rules = client.get_notification_rules().await?;
-                    
+
                     if json {
                         println!("{}", serde_json::to_string_pretty(&rules)?);
                     } else {
                         println!("\n{} {}", "🔔", "Notification Rules:".cyan().bold());
-                        
+
                         if rules.is_empty() {
                             println!("  {}", "(none)".dimmed());
                         } else {
                             for r in rules {
                                 println!("\n{}", "━".repeat(80).bright_black());
-                                
-                                let status_badge = if r.enabled { "✓ Enabled".green() } else { "○ Disabled".red() };
-                                println!("{} {} {}", status_badge.bold(), r.name.bold().bright_white(), format!("(ID: {})", r.id).dimmed());
-                                
+
+                                let status_badge = if r.enabled {
+                                    "✓ Enabled".green()
+                                } else {
+                                    "○ Disabled".red()
+                                };
+                                println!(
+                                    "{} {} {}",
+                                    status_badge.bold(),
+                                    r.name.bold().bright_white(),
+                                    format!("(ID: {})", r.id).dimmed()
+                                );
+
                                 // Event types
-                                let events_str = r.event_types.iter()
+                                let events_str = r
+                                    .event_types
+                                    .iter()
                                     .map(|e| format!("{:?}", e))
                                     .collect::<Vec<_>>()
                                     .join(", ");
                                 println!("  {} {}", "Events:".dimmed(), events_str.yellow());
-                                
+
                                 // Path pattern
                                 if let Some(p) = &r.path_pattern {
                                     println!("  {} {}", "Path:".dimmed(), p.cyan());
                                 }
-                                
+
                                 // Action
                                 let action_str = format!("{:?}", r.action_type);
-                                println!("  {} {} → {}", "Action:".dimmed(), action_str.blue(), r.destination);
-                                
+                                println!(
+                                    "  {} {} → {}",
+                                    "Action:".dimmed(),
+                                    action_str.blue(),
+                                    r.destination
+                                );
+
                                 // Timeout
-                               println!("  {} {}s", "Timeout:".dimmed(), r.timeout.to_string().yellow());
-                                
+                                println!(
+                                    "  {} {}s",
+                                    "Timeout:".dimmed(),
+                                    r.timeout.to_string().yellow()
+                                );
+
                                 // Stats
                                 if r.trigger_count > 0 {
                                     println!("\n  {} {}", "📊", "Stats:".bold());
-                                    
+
                                     let success_rate = if r.trigger_count > 0 {
                                         (r.success_count as f64 / r.trigger_count as f64) * 100.0
                                     } else {
                                         0.0
                                     };
-                                    
+
                                     let _rate_color = if success_rate >= 95.0 {
                                         success_rate.to_string().green()
                                     } else if success_rate >= 80.0 {
@@ -747,25 +951,51 @@ async fn main() -> Result<()> {
                                     } else {
                                         success_rate.to_string().red()
                                     };
-                                    
-                                    println!("    {} {} triggers", "•".dimmed(), r.trigger_count.to_string().bright_white());
-                                    println!("    {} {} ({:.1}%)", "•".dimmed(), "Success".green(), success_rate);
-                                    
+
+                                    println!(
+                                        "    {} {} triggers",
+                                        "•".dimmed(),
+                                        r.trigger_count.to_string().bright_white()
+                                    );
+                                    println!(
+                                        "    {} {} ({:.1}%)",
+                                        "•".dimmed(),
+                                        "Success".green(),
+                                        success_rate
+                                    );
+
                                     if r.failure_count > 0 {
-                                        println!("    {} {} failures", "•".dimmed(), r.failure_count.to_string().red());
+                                        println!(
+                                            "    {} {} failures",
+                                            "•".dimmed(),
+                                            r.failure_count.to_string().red()
+                                        );
                                     }
                                     if r.timeout_count > 0 {
-                                        println!("    {} {} timeouts", "•".dimmed(), r.timeout_count.to_string().yellow());
+                                        println!(
+                                            "    {} {} timeouts",
+                                            "•".dimmed(),
+                                            r.timeout_count.to_string().yellow()
+                                        );
                                     }
-                                    
+
                                     if r.trigger_count > 0 {
-                                        let avg_ms = r.total_execution_ms as f64 / r.trigger_count as f64;
-                                        println!("    {} Avg execution: {:.1}ms", "•".dimmed(), avg_ms);
+                                        let avg_ms =
+                                            r.total_execution_ms as f64 / r.trigger_count as f64;
+                                        println!(
+                                            "    {} Avg execution: {:.1}ms",
+                                            "•".dimmed(),
+                                            avg_ms
+                                        );
                                     }
-                                    
+
                                     if let Some(last) = r.last_triggered {
                                         let time_ago = format_time_ago(last);
-                                        println!("    {} Last fired: {}", "•".dimmed(), time_ago.cyan());
+                                        println!(
+                                            "    {} Last fired: {}",
+                                            "•".dimmed(),
+                                            time_ago.cyan()
+                                        );
                                     }
                                 } else {
                                     println!("\n  {} {}", "ℹ".dimmed(), "Never triggered".dimmed());
@@ -778,7 +1008,7 @@ async fn main() -> Result<()> {
                 }
                 NotifyAction::Stats { rule_id } => {
                     let stats = client.get_notification_stats().await?;
-                    
+
                     if let Some(id) = rule_id {
                         // Show stats for specific rule
                         if let Some(s) = stats.iter().find(|s| s.rule_id == id) {
@@ -789,7 +1019,7 @@ async fn main() -> Result<()> {
                     } else {
                         // Show all stats
                         println!("\n{} {}", "📊", "Notification Statistics:".cyan().bold());
-                        
+
                         if stats.is_empty() {
                             println!("  {}\n", "(no rules)".dimmed());
                         } else {
@@ -798,21 +1028,47 @@ async fn main() -> Result<()> {
                             let total_success: u64 = stats.iter().map(|s| s.success_count).sum();
                             let total_failures: u64 = stats.iter().map(|s| s.failure_count).sum();
                             let total_timeouts: u64 = stats.iter().map(|s| s.timeout_count).sum();
-                            
+
                             let overall_rate = if total_triggers > 0 {
                                 (total_success as f64 / total_triggers as f64) * 100.0
                             } else {
                                 0.0
                             };
-                            
-                            println!("\n{}", "┌─ Overall Summary ─────────────────────────────┐".bright_black());
-                            println!("│ {} Total Triggers {:>27} │", "📬".dimmed(), total_triggers.to_string().bright_white());
-                            println!("│ {} Successful    {:>27} │", "✓".green(), total_success.to_string().green());
-                            println!("│ {} Failed        {:>27} │", "✗".red(), total_failures.to_string().red());
-                            println!("│ {} Timeouts      {:>27} │", "⏱".yellow(), total_timeouts.to_string().yellow());
-                            println!("│ {} Success Rate  {:>26.1}% │", "📈".dimmed(), overall_rate);
-                            println!("{}\n", "└───────────────────────────────────────────────┘".bright_black());
-                            
+
+                            println!(
+                                "\n{}",
+                                "┌─ Overall Summary ─────────────────────────────┐".bright_black()
+                            );
+                            println!(
+                                "│ {} Total Triggers {:>27} │",
+                                "📬".dimmed(),
+                                total_triggers.to_string().bright_white()
+                            );
+                            println!(
+                                "│ {} Successful    {:>27} │",
+                                "✓".green(),
+                                total_success.to_string().green()
+                            );
+                            println!(
+                                "│ {} Failed        {:>27} │",
+                                "✗".red(),
+                                total_failures.to_string().red()
+                            );
+                            println!(
+                                "│ {} Timeouts      {:>27} │",
+                                "⏱".yellow(),
+                                total_timeouts.to_string().yellow()
+                            );
+                            println!(
+                                "│ {} Success Rate  {:>26.1}% │",
+                                "📈".dimmed(),
+                                overall_rate
+                            );
+                            println!(
+                                "{}\n",
+                                "└───────────────────────────────────────────────┘".bright_black()
+                            );
+
                             // Individual rule stats
                             for s in &stats {
                                 print_rule_stats(s);
@@ -823,20 +1079,21 @@ async fn main() -> Result<()> {
             }
         }
 
-        
         Commands::Interactive => {
             use std::io::{self, BufRead, Write};
             let stdin = io::stdin();
             // JSON output mode for GUI integration
             println!("{{\"status\": \"ready\"}}");
             io::stdout().flush().ok();
-            
+
             for line in stdin.lock().lines() {
                 let line = line?;
                 // Split by semicolon for robust parsing
                 let parts: Vec<&str> = line.trim().split(';').collect();
-                if parts.is_empty() { continue; }
-                
+                if parts.is_empty() {
+                    continue;
+                }
+
                 match parts[0] {
                     "authorize" => {
                         if parts.len() < 3 {
@@ -846,7 +1103,7 @@ async fn main() -> Result<()> {
                         let pattern_str = parts[1];
                         let mode_str = parts[2];
                         let description = parts.get(3).map(|s| s.to_string());
-                        
+
                         let pattern_list: Vec<String> = pattern_str.split(',')
                             .map(|s| s.trim().to_string())
                             .collect();
@@ -859,7 +1116,7 @@ async fn main() -> Result<()> {
                                 continue;
                             }
                         };
-                        
+
                         // Backend Deduplication Check
                         let mut is_duplicate = false;
                         if let Ok(existing_patterns) = client.get_patterns().await {
@@ -871,12 +1128,12 @@ async fn main() -> Result<()> {
                                 }
                             }
                         }
-                        
+
                         if is_duplicate {
                            println!("{{\"status\": \"error\", \"message\": \"Pattern already authorized\"}}");
-                           continue; 
+                           continue;
                         }
-                        
+
                         match client.authorize_pattern(&pattern_list, match_mode, description.as_deref()).await {
                             Ok(_) => println!("{{\"status\": \"ok\", \"action\": \"authorize\", \"pattern\": \"{}\"}}", pattern_str),
                             Err(e) => println!("{{\"status\": \"error\", \"message\": \"{}\"}}", e),
@@ -887,11 +1144,11 @@ async fn main() -> Result<()> {
                             println!("{{\"error\": \"missing pattern or mode\"}}");
                             continue;
                         }
-                        
+
                         let pattern: Vec<String> = parts[1].split(',')
                             .map(|s| s.trim().to_string())
                             .collect();
-                        
+
                         let match_mode = match parts[2].trim() {
                             "Exact" => kprotect_common::MatchMode::Exact,
                             "Suffix" => kprotect_common::MatchMode::Suffix,
@@ -900,7 +1157,7 @@ async fn main() -> Result<()> {
                                 continue;
                             }
                         };
-                        
+
                         match client.revoke_pattern(pattern.clone(), match_mode).await {
                             Ok(_) => println!("{{\"status\": \"ok\", \"action\": \"REVOKE_PATTERN\", \"pattern\": {:?}}}", pattern),
                             Err(e) => println!("{{\"status\": \"error\", \"message\": \"{}\"}}", e),
@@ -926,7 +1183,7 @@ async fn main() -> Result<()> {
                         }
                         let zone_type = parts[1].trim();
                         let pattern = parts[2].trim();
-                        
+
                         match client.add_zone(zone_type, pattern).await {
                              Ok(_) => println!("{{\"status\": \"ok\", \"action\": \"zone_add\", \"type\": \"{}\", \"pattern\": \"{}\"}}", zone_type, pattern),
                              Err(e) => println!("{{\"status\": \"error\", \"message\": \"{}\"}}", e),
@@ -939,7 +1196,7 @@ async fn main() -> Result<()> {
                         }
                         let zone_type = parts[1].trim();
                         let pattern = parts[2].trim();
-                        
+
                         match client.remove_zone(zone_type, pattern).await {
                              Ok(_) => println!("{{\"status\": \"ok\", \"action\": \"zone_remove\", \"type\": \"{}\", \"pattern\": \"{}\"}}", zone_type, pattern),
                              Err(e) => println!("{{\"status\": \"error\", \"message\": \"{}\"}}", e),
@@ -962,7 +1219,7 @@ async fn main() -> Result<()> {
                             continue;
                         }
                         let pattern = parts[1].trim();
-                        
+
                         match client.add_enrichment_pattern(pattern).await {
                              Ok(_) => println!("{{\"status\": \"ok\", \"action\": \"pattern_add\", \"pattern\": \"{}\"}}", pattern),
                              Err(e) => println!("{{\"status\": \"error\", \"message\": \"{}\"}}", e),
@@ -974,7 +1231,7 @@ async fn main() -> Result<()> {
                             continue;
                         }
                         let pattern = parts[1].trim();
-                        
+
                         match client.remove_enrichment_pattern(pattern).await {
                              Ok(_) => println!("{{\"status\": \"ok\", \"action\": \"pattern_remove\", \"pattern\": \"{}\"}}", pattern),
                              Err(e) => println!("{{\"status\": \"error\", \"message\": \"{}\"}}", e),
@@ -996,7 +1253,7 @@ async fn main() -> Result<()> {
                         let status = client.get_daemon_status().await.ok();
                         let encryption = client.get_encryption_info().await.ok();
                         let system = client.get_system_info().await.ok();
-                        
+
                         let output = serde_json::json!({
                             "status": "ok",
                             "daemon": status,
@@ -1114,6 +1371,42 @@ async fn main() -> Result<()> {
                             Err(e) => println!("{{\"status\": \"error\", \"message\": \"{}\"}}", e),
                         }
                     }
+                    "SET_ENGINE" => {
+                        if parts.len() < 2 {
+                            println!("{{\"error\": \"usage: SET_ENGINE;true|false\"}}");
+                            continue;
+                        }
+                        if let Ok(enabled) = parts[1].trim().parse::<bool>() {
+                            match client.set_engine_enabled(enabled).await {
+                                Ok(_) => println!("{{\"status\": \"ok\", \"action\": \"SET_ENGINE\", \"enabled\": {}}}", enabled),
+                                Err(e) => println!("{{\"status\": \"error\", \"message\": \"{}\"}}", e),
+                            }
+                        }
+                    }
+                    "SET_FILE_PROTECTION" => {
+                        if parts.len() < 2 {
+                            println!("{{\"error\": \"usage: SET_FILE_PROTECTION;true|false\"}}");
+                            continue;
+                        }
+                        if let Ok(enabled) = parts[1].trim().parse::<bool>() {
+                            match client.set_file_protection(enabled).await {
+                                Ok(_) => println!("{{\"status\": \"ok\", \"action\": \"SET_FILE_PROTECTION\", \"enabled\": {}}}", enabled),
+                                Err(e) => println!("{{\"status\": \"error\", \"message\": \"{}\"}}", e),
+                            }
+                        }
+                    }
+                    "SET_SUDO_BYPASS" => {
+                        if parts.len() < 2 {
+                            println!("{{\"error\": \"usage: SET_SUDO_BYPASS;true|false\"}}");
+                            continue;
+                        }
+                        if let Ok(enabled) = parts[1].trim().parse::<bool>() {
+                            match client.set_sudo_bypass(enabled).await {
+                                Ok(_) => println!("{{\"status\": \"ok\", \"action\": \"SET_SUDO_BYPASS\", \"enabled\": {}}}", enabled),
+                                Err(e) => println!("{{\"status\": \"error\", \"message\": \"{}\"}}", e),
+                            }
+                        }
+                    }
                     "SUDO_ADD" => {
                         if parts.len() < 3 {
                             println!("{{\"error\": \"usage: SUDO_ADD;pattern;description\"}}");
@@ -1124,7 +1417,7 @@ async fn main() -> Result<()> {
                         let pattern_list: Vec<String> = pattern_str.split(',')
                             .map(|s| s.trim().to_string())
                             .collect();
-                        
+
                         match client.add_sudo_rule(&pattern_list, description).await {
                              Ok(_) => println!("{{\"status\": \"ok\", \"action\": \"SUDO_ADD\", \"description\": \"{}\"}}", description),
                              Err(e) => println!("{{\"status\": \"error\", \"message\": \"{}\"}}", e),
@@ -1150,7 +1443,7 @@ async fn main() -> Result<()> {
                         let pattern_list: Vec<String> = pattern_str.split(',')
                             .map(|s| s.trim().to_string())
                             .collect();
-                        
+
                         match client.remove_sudo_rule(&pattern_list).await {
                              Ok(_) => println!("{{\"status\": \"ok\", \"action\": \"SUDO_REMOVE\", \"pattern\": \"{}\"}}", pattern_str),
                              Err(e) => println!("{{\"status\": \"error\", \"message\": \"{}\"}}", e),
@@ -1163,10 +1456,27 @@ async fn main() -> Result<()> {
                         }
                         let pid = parts[1].trim().parse::<u32>().unwrap_or(0);
                         let cmd = parts.get(2).map(|s| s.to_string());
-                        
+
                         match client.check_sudo(pid, cmd.as_deref()).await {
                              Ok(allowed) => println!("{{\"status\": \"ok\", \"action\": \"SUDO_CHECK\", \"allowed\": {}}}", allowed),
                              Err(e) => println!("{{\"status\": \"error\", \"message\": \"{}\"}}", e),
+                        }
+                    }
+                    "config_export" => {
+                        match client.export_config().await {
+                            Ok(json) => println!("{{\"status\": \"ok\", \"config\": {}}}", json),
+                            Err(e) => println!("{{\"status\": \"error\", \"message\": \"{}\"}}", e),
+                        }
+                    }
+                    "config_import" => {
+                        let json = line.trim().strip_prefix("config_import;").unwrap_or("");
+                        if json.is_empty() {
+                            println!("{{\"error\": \"usage: config_import;json\"}}");
+                            continue;
+                        }
+                        match client.import_config(json).await {
+                            Ok(_) => println!("{{\"status\": \"ok\", \"action\": \"config_import\"}}"),
+                            Err(e) => println!("{{\"status\": \"error\", \"message\": \"{}\"}}", e),
                         }
                     }
                     "exit" | "quit" => break,
@@ -1175,75 +1485,147 @@ async fn main() -> Result<()> {
             }
         }
 
-        Commands::Sudo { action } => {
-            match action {
-                SudoAction::Add { pattern, description } => {
-                    let pattern_list: Vec<String> = pattern.split(',')
-                        .map(|s| s.trim().to_string())
-                        .collect();
-                    
-                    client.add_sudo_rule(&pattern_list, &description).await?;
-                    println!("{} Added sudo rule: {}", "✓".green().bold(), description.cyan());
-                    println!("   {} {}", "Lineage:".dimmed(), pattern.yellow());
-                }
-                SudoAction::List { json } => {
-                    let rules = client.list_sudo_rules().await?;
-                    
-                    if json {
-                        println!("{}", serde_json::to_string_pretty(&rules)?);
-                    } else if rules.is_empty() {
-                        println!("\n{} {}", "ℹ".blue(), "No sudo rules defined".dimmed());
+        Commands::Config { action } => match action {
+            ConfigAction::Engine { enabled } => {
+                client.set_engine_enabled(enabled).await?;
+                println!(
+                    "{} Protection engine: {}",
+                    "✓".green().bold(),
+                    if enabled {
+                        "ENABLED".green()
                     } else {
-                        println!("\n{} Sudo Rules:", "🔑".bold());
-                        for (idx, rule) in rules.iter().enumerate() {
-                            println!("\n  {} Rule #{}", "→".cyan(), idx + 1);
-                            println!("    {} {}", "Chain:".dimmed(), rule.pattern.join(" → ").yellow());
-                            println!("    {} {}", "Desc:".dimmed(), rule.description.cyan());
-                            println!("    {} {}", "Status:".dimmed(), if rule.enabled { "Active".green() } else { "Disabled".red() });
-                        }
-                        println!();
+                        "DISABLED".red()
                     }
-                }
-                SudoAction::Remove { pattern } => {
-                    let pattern_list: Vec<String> = pattern.split(',')
-                        .map(|s| s.trim().to_string())
-                        .collect();
-                    
-                    match client.remove_sudo_rule(&pattern_list).await {
-                        Ok(_) => println!("{} Removed sudo rule: {}", "✓".green().bold(), pattern.yellow()),
-                        Err(e) => println!("{} Failed to remove rule: {}", "✗".red().bold(), e),
-                    }
-                }
-                SudoAction::Check { pid, cmd } => {
-                    let allowed = client.check_sudo(pid, cmd.as_deref()).await?;
-                    if allowed {
-                        println!("{} {}", "✓".green().bold(), "ALLOWED: Sudo would be permitted".green());
+                );
+            }
+            ConfigAction::FileProtection { enabled } => {
+                client.set_file_protection(enabled).await?;
+                println!(
+                    "{} File protection: {}",
+                    "✓".green().bold(),
+                    if enabled {
+                        "ENABLED".green()
                     } else {
-                        println!("{} {}", "✗".red().bold(), "DENIED: Sudo would be blocked".red());
+                        "DISABLED".red()
                     }
+                );
+            }
+            ConfigAction::SudoBypass { enabled } => {
+                client.set_sudo_bypass(enabled).await?;
+                println!(
+                    "{} Sudo bypass: {}",
+                    "✓".green().bold(),
+                    if enabled {
+                        "ENABLED".green()
+                    } else {
+                        "DISABLED".red()
+                    }
+                );
+            }
+            ConfigAction::Export { output } => {
+                handle_export(&client, output).await?;
+            }
+            ConfigAction::Import { input, overwrite } => {
+                handle_import(&client, input, overwrite).await?;
+            }
+        },
+
+        Commands::Sudo { action } => match action {
+            SudoAction::Add {
+                pattern,
+                description,
+            } => {
+                let pattern_list: Vec<String> =
+                    pattern.split(',').map(|s| s.trim().to_string()).collect();
+
+                client.add_sudo_rule(&pattern_list, &description).await?;
+                println!(
+                    "{} Added sudo rule: {}",
+                    "✓".green().bold(),
+                    description.cyan()
+                );
+                println!("   {} {}", "Lineage:".dimmed(), pattern.yellow());
+            }
+            SudoAction::List { json } => {
+                let rules = client.list_sudo_rules().await?;
+
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&rules)?);
+                } else if rules.is_empty() {
+                    println!("\n{} {}", "ℹ".blue(), "No sudo rules defined".dimmed());
+                } else {
+                    println!("\n{} Sudo Rules:", "🔑".bold());
+                    for (idx, rule) in rules.iter().enumerate() {
+                        println!("\n  {} Rule #{}", "→".cyan(), idx + 1);
+                        println!(
+                            "    {} {}",
+                            "Chain:".dimmed(),
+                            rule.pattern.join(" → ").yellow()
+                        );
+                        println!("    {} {}", "Desc:".dimmed(), rule.description.cyan());
+                        println!(
+                            "    {} {}",
+                            "Status:".dimmed(),
+                            if rule.enabled {
+                                "Active".green()
+                            } else {
+                                "Disabled".red()
+                            }
+                        );
+                    }
+                    println!();
                 }
             }
-        }
+            SudoAction::Remove { pattern } => {
+                let pattern_list: Vec<String> =
+                    pattern.split(',').map(|s| s.trim().to_string()).collect();
+
+                match client.remove_sudo_rule(&pattern_list).await {
+                    Ok(_) => println!(
+                        "{} Removed sudo rule: {}",
+                        "✓".green().bold(),
+                        pattern.yellow()
+                    ),
+                    Err(e) => println!("{} Failed to remove rule: {}", "✗".red().bold(), e),
+                }
+            }
+            SudoAction::Check { pid, cmd } => {
+                let allowed = client.check_sudo(pid, cmd.as_deref()).await?;
+                if allowed {
+                    println!(
+                        "{} {}",
+                        "✓".green().bold(),
+                        "ALLOWED: Sudo would be permitted".green()
+                    );
+                } else {
+                    println!(
+                        "{} {}",
+                        "✗".red().bold(),
+                        "DENIED: Sudo would be blocked".red()
+                    );
+                }
+            }
+        },
     }
-    
+
     Ok(())
 }
 
 /// Format a Unix timestamp as "time ago" string
 fn format_time_ago(timestamp: u64) -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    
+
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    
+
     if timestamp > now {
         return "in the future".to_string();
     }
-    
+
     let diff = now - timestamp;
-    
+
     if diff < 60 {
         format!("{}s ago", diff)
     } else if diff < 3600 {
@@ -1258,28 +1640,55 @@ fn format_time_ago(timestamp: u64) -> String {
 /// Print stats for a single notification rule
 fn print_rule_stats(s: &kprotect_common::NotificationStats) {
     use colored::*;
-    
-    println!("\n{}", "┌────────────────────────────────────────────────┐".bright_black());
-    println!("│ {} {} {}", 
-        "Rule:".dimmed(), 
+
+    println!(
+        "\n{}",
+        "┌────────────────────────────────────────────────┐".bright_black()
+    );
+    println!(
+        "│ {} {} {}",
+        "Rule:".dimmed(),
         s.rule_name.bold().bright_white(),
         format!("(ID: {})", s.rule_id).dimmed()
     );
-    println!("{}", "├────────────────────────────────────────────────┤".bright_black());
-    
+    println!(
+        "{}",
+        "├────────────────────────────────────────────────┤".bright_black()
+    );
+
     if s.total_triggers == 0 {
-        println!("│ {} {}                                   │", "ℹ".dimmed(), "Never triggered".dimmed());
+        println!(
+            "│ {} {}                                   │",
+            "ℹ".dimmed(),
+            "Never triggered".dimmed()
+        );
     } else {
-        println!("│ {} Triggers:     {:>27} │", "📬".dimmed(), s.total_triggers.to_string().bright_white());
-        println!("│ {} Success:      {:>27} │", "✓".green(), s.success_count.to_string().green());
-        
+        println!(
+            "│ {} Triggers:     {:>27} │",
+            "📬".dimmed(),
+            s.total_triggers.to_string().bright_white()
+        );
+        println!(
+            "│ {} Success:      {:>27} │",
+            "✓".green(),
+            s.success_count.to_string().green()
+        );
+
         if s.failure_count > 0 {
-            println!("│ {} Failed:       {:>27} │", "✗".red(), s.failure_count.to_string().red());
+            println!(
+                "│ {} Failed:       {:>27} │",
+                "✗".red(),
+                s.failure_count.to_string().red()
+            );
         }
         if s.timeout_count > 0 {
-            println!("│ {} Timeouts:     {:>27} │", "⏱".yellow(), s.timeout_count.to_string().yellow());
+            println!(
+                "│ {} Timeouts:     {:>27} │",
+                "⏱".yellow(),
+                s.timeout_count.to_string().yellow()
+            );
         }
-        
+
         let rate_colored = if s.success_rate >= 95.0 {
             format!("{:.1}%", s.success_rate).green()
         } else if s.success_rate >= 80.0 {
@@ -1287,15 +1696,83 @@ fn print_rule_stats(s: &kprotect_common::NotificationStats) {
         } else {
             format!("{:.1}%", s.success_rate).red()
         };
-        
-        println!("│ {} Success Rate: {:>27} │", "📈".dimmed(), rate_colored.to_string());
-        println!("│ {} Avg Time:     {:>24.1}ms │", "⚡".dimmed(), s.avg_execution_ms);
-        
+
+        println!(
+            "│ {} Success Rate: {:>27} │",
+            "📈".dimmed(),
+            rate_colored.to_string()
+        );
+        println!(
+            "│ {} Avg Time:     {:>24.1}ms │",
+            "⚡".dimmed(),
+            s.avg_execution_ms
+        );
+
         if let Some(last) = s.last_triggered {
             let time_ago = format_time_ago(last);
-            println!("│ {} Last Fired:   {:>27} │", "🕐".dimmed(), time_ago.cyan().to_string());
+            println!(
+                "│ {} Last Fired:   {:>27} │",
+                "🕐".dimmed(),
+                time_ago.cyan().to_string()
+            );
         }
     }
-    
-    println!("{}", "└────────────────────────────────────────────────┘".bright_black());
+
+    println!(
+        "{}",
+        "└────────────────────────────────────────────────┘".bright_black()
+    );
+}
+
+async fn handle_export(
+    client: &kprotect_client::KprotectClient,
+    output_path: Option<String>,
+) -> Result<()> {
+    println!(
+        "{} {} Exporting configuration...",
+        "📦".dimmed(),
+        "kprotect:".bold()
+    );
+    let json = client.export_config().await?;
+
+    if let Some(path) = output_path {
+        let mut file = File::create(&path)?;
+        file.write_all(json.as_bytes())?;
+        println!(
+            "{} {} Configuration saved to: {}",
+            "✓".green().bold(),
+            "Success:".bold(),
+            path.cyan()
+        );
+    } else {
+        println!("{}", json);
+    }
+
+    Ok(())
+}
+
+async fn handle_import(
+    client: &kprotect_client::KprotectClient,
+    input_path: String,
+    _overwrite: bool,
+) -> Result<()> {
+    println!(
+        "{} {} Importing configuration from {}...",
+        "📥".dimmed(),
+        "kprotect:".bold(),
+        input_path.cyan()
+    );
+
+    let mut file = File::open(&input_path)?;
+    let mut json = String::new();
+    file.read_to_string(&mut json)?;
+
+    client.import_config(&json).await?;
+
+    println!(
+        "{} {} Configuration successfully imported!",
+        "✓".green().bold(),
+        "Success:".bold()
+    );
+    Ok(())
 }

@@ -1,2 +1,2 @@
-pub mod startup;
 pub mod api;
+pub mod startup;

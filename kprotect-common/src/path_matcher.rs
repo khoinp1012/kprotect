@@ -109,7 +109,10 @@ impl PathMatcher {
 
         let asterisk_count = pattern.chars().filter(|&c| c == '*').count();
         if asterisk_count > 1 {
-            return Err(format!("Invalid pattern '{}': Multiple asterisks are not allowed.", pattern));
+            return Err(format!(
+                "Invalid pattern '{}': Multiple asterisks are not allowed.",
+                pattern
+            ));
         }
 
         if asterisk_count == 1 {
@@ -126,7 +129,10 @@ impl PathMatcher {
                 let reversed: String = suffix.chars().rev().collect();
                 self.suffixes.insert(&reversed);
             } else {
-                 return Err(format!("Invalid pattern '{}': Asterisk must be at the start or end.", pattern));
+                return Err(format!(
+                    "Invalid pattern '{}': Asterisk must be at the start or end.",
+                    pattern
+                ));
             }
         } else {
             // Exact match
@@ -177,8 +183,8 @@ mod tests {
         assert!(matcher.matches("/usr/bin/local/script"));
         // Boundary check: "/usr/bin/" should match if the pattern was just "/usr/bin/*"
         // Our logic inserts "/usr/bin/".
-        assert!(matcher.matches("/usr/bin/")); 
-        
+        assert!(matcher.matches("/usr/bin/"));
+
         // Should not match partial prefix if not complete
         // E.g. pattern "/usr/bin/*" stored as "/usr/bin/"
         // Input "/usr/bi" -> mismatch 'n'
@@ -216,7 +222,6 @@ mod tests {
         assert!(!matcher.matches("file.suffix.other"));
     }
 
-
     #[test]
     fn test_asterisk_match() {
         let mut matcher = PathMatcher::new();
@@ -230,7 +235,7 @@ mod tests {
     fn test_invalid_patterns() {
         let mut matcher = PathMatcher::new();
         assert!(matcher.add_rule("/bad/**").is_err());
-        assert!(matcher.add_rule("/bad/*/pattern").is_err()); 
+        assert!(matcher.add_rule("/bad/*/pattern").is_err());
         assert!(matcher.add_rule("*.so.*").is_err());
         assert!(matcher.add_rule("normal/path").is_ok());
         assert!(matcher.add_rule("/prefix/*").is_ok());

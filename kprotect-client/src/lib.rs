@@ -1,5 +1,5 @@
 //! kprotect Client Library
-//! 
+//!
 //! Provides a clean Rust API for communicating with the kprotect daemon
 //! via Unix socket protocol.
 
@@ -26,7 +26,9 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
 // Re-export common types
-pub use kprotect_common::{MatchMode, LogEntry};
+pub use kprotect_common::{
+    EnrichmentConfig, KProtectBackup, LogConfig, LogEntry, MatchMode, ZonesConfig,
+};
 
 /// Client for communicating with kprotect daemon
 #[derive(Clone)]
@@ -46,32 +48,32 @@ impl KprotectClient {
             socket_path: PathBuf::from(path),
         }
     }
-    
+
     /// Create a new client with custom socket path
     pub fn with_socket_path(path: impl Into<PathBuf>) -> Self {
         Self {
             socket_path: path.into(),
         }
     }
-    
+
     /// Send a command and get response
     async fn send_command(&self, command: &str) -> Result<String> {
         let mut stream = UnixStream::connect(&self.socket_path)
             .await
             .context("Failed to connect to kprotect daemon")?;
-        
+
         // Send command
         stream.write_all(command.as_bytes()).await?;
         stream.write_all(b"\n").await?;
-        
+
         // Read response
         let mut reader = BufReader::new(stream);
         let mut response = String::new();
         reader.read_line(&mut response).await?;
-        
+
         Ok(response.trim().to_string())
     }
-    
+
     /// Parse OK response and extract JSON
     fn parse_response(&self, response: &str) -> Result<String> {
         if let Some(json) = response.strip_prefix("OK: ") {
@@ -82,47 +84,50 @@ impl KprotectClient {
             anyhow::bail!("Unexpected response: {}", response)
         }
     }
-    
+
     /// Get daemon capabilities
     pub async fn capabilities(&self) -> Result<Capabilities> {
         let response = self.send_command("CAPABILITIES").await?;
         let json = self.parse_response(&response)?;
-        let caps = serde_json::from_str(&json)
-            .context("Failed to parse capabilities")?;
+        let caps = serde_json::from_str(&json).context("Failed to parse capabilities")?;
         Ok(caps)
     }
-    
+
     /// Get schema for a resource
     pub async fn schema(&self, resource: &str) -> Result<Schema> {
         let cmd = format!("SCHEMA {}", resource);
         let response = self.send_command(&cmd).await?;
         let json = self.parse_response(&response)?;
-        let schema = serde_json::from_str(&json)
-            .context("Failed to parse schema")?;
+        let schema = serde_json::from_str(&json).context("Failed to parse schema")?;
         Ok(schema)
     }
-    
+
     // ...
 
     /// Authorize a lineage pattern
-    /// 
+    ///
     /// # Arguments
     /// * `pattern` - List of process paths (must include full paths)
     /// * `mode` - Match mode (Exact or Suffix)
     /// * `description` - Optional description
-    pub async fn authorize_pattern(&self, pattern: &[String], mode: MatchMode, description: Option<&str>) -> Result<()> {
+    pub async fn authorize_pattern(
+        &self,
+        pattern: &[String],
+        mode: MatchMode,
+        description: Option<&str>,
+    ) -> Result<()> {
         let pattern_str = pattern.join(",");
         let mode_str = match mode {
             MatchMode::Exact => "Exact",
             MatchMode::Suffix => "Suffix",
         };
-        
+
         let cmd = if let Some(desc) = description {
             format!("AUTHORIZE;{};{};{}", pattern_str, mode_str, desc)
         } else {
             format!("AUTHORIZE;{};{}", pattern_str, mode_str)
         };
-        
+
         let response = self.send_command(&cmd).await?;
         if response.starts_with("OK:") {
             Ok(())
@@ -140,48 +145,47 @@ impl KprotectClient {
         };
         let cmd = format!("REVOKE_PATTERN;{};{}", pattern_str, mode_str);
         let response = self.send_command(&cmd).await?;
-        
+
         if response.starts_with("OK:") {
             Ok(())
         } else {
             anyhow::bail!("Revocation failed: {}", response)
         }
     }
-    
+
     /// Get all authorized patterns
     pub async fn get_patterns(&self) -> Result<Vec<kprotect_common::AuthorizedPattern>> {
         let response = self.send_command("LIST_PATTERNS").await?;
         let json = self.parse_response(&response)?;
-        let patterns = serde_json::from_str(&json)
-            .context("Failed to parse patterns")?;
+        let patterns = serde_json::from_str(&json).context("Failed to parse patterns")?;
         Ok(patterns)
     }
-    
+
     /// Deprecated: Authorize a signature (Use authorize_pattern instead)
     #[deprecated(note = "Use authorize_pattern instead")]
     pub async fn authorize(&self, _signature: u64, _description: Option<&str>) -> Result<()> {
         // Legacy support wrapper or fail
         anyhow::bail!("Hash-based authorization is deprecated. Please update your tools.")
     }
-    
+
     /// Deprecated: Revoke a signature (Use revoke_pattern instead)
     #[deprecated(note = "Use revoke_pattern instead")]
     pub async fn revoke(&self, _signature: u64) -> Result<()> {
         anyhow::bail!("Hash-based revocation is deprecated. Please update your tools.")
     }
-    
+
     /// Ping daemon
     pub async fn ping(&self) -> Result<String> {
         let response = self.send_command("PING").await?;
         Ok(response)
     }
-    
+
     /// Get daemon version
     pub async fn version(&self) -> Result<String> {
         let response = self.send_command("VERSION").await?;
         Ok(response)
     }
-    
+
     /// Subscribe to live events
     pub async fn subscribe(&self, stream: &mut UnixStream) -> Result<()> {
         stream.write_all(b"SUBSCRIBE\n").await?;
@@ -201,31 +205,64 @@ impl KprotectClient {
         let stream = UnixStream::connect(&self.socket_path)
             .await
             .context("Failed to connect to kprotect daemon for streaming")?;
-        
+
         // The daemon automatically streams events to all connected clients
         // No command needed - just keep the connection open
         Ok(stream)
     }
-    
+
     /// Get daemon status (health, uptime, eBPF status)
     pub async fn get_daemon_status(&self) -> Result<DaemonStatus> {
         let response = self.send_command("STATUS").await?;
         let json = self.parse_response(&response)?;
         serde_json::from_str(&json).context("Failed to parse daemon status")
     }
-    
+
     /// Get encryption information
     pub async fn get_encryption_info(&self) -> Result<EncryptionInfo> {
         let response = self.send_command("ENCRYPTION_INFO").await?;
         let json = self.parse_response(&response)?;
         serde_json::from_str(&json).context("Failed to parse encryption info")
     }
-    
+
     /// Get system information (policy stats, eBPF maps)
     pub async fn get_system_info(&self) -> Result<SystemInfo> {
         let response = self.send_command("SYSTEM_INFO").await?;
         let json = self.parse_response(&response)?;
         serde_json::from_str(&json).context("Failed to parse system info")
+    }
+
+    /// Enable or disable the protection engine
+    pub async fn set_engine_enabled(&self, enabled: bool) -> Result<()> {
+        let cmd = format!("SET_ENGINE;{}", enabled);
+        let response = self.send_command(&cmd).await?;
+        if response.starts_with("OK") {
+            Ok(())
+        } else {
+            anyhow::bail!("Failed to set engine state: {}", response)
+        }
+    }
+
+    /// Enable or disable file protection enforcement
+    pub async fn set_file_protection(&self, enabled: bool) -> Result<()> {
+        let cmd = format!("SET_FILE_PROTECTION;{}", enabled);
+        let response = self.send_command(&cmd).await?;
+        if response.starts_with("OK") {
+            Ok(())
+        } else {
+            anyhow::bail!("Failed to set file protection: {}", response)
+        }
+    }
+
+    /// Enable or disable sudo bypass for authorized lineages
+    pub async fn set_sudo_bypass(&self, enabled: bool) -> Result<()> {
+        let cmd = format!("SET_SUDO_BYPASS;{}", enabled);
+        let response = self.send_command(&cmd).await?;
+        if response.starts_with("OK") {
+            Ok(())
+        } else {
+            anyhow::bail!("Failed to set sudo bypass: {}", response)
+        }
     }
 
     /// Get resource usage statistics (current/max for maps)
@@ -317,18 +354,6 @@ mod tests {
 // Policy Management Types
 // ============================================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ZonesConfig {
-    pub red_zones: Vec<String>,
-    #[serde(default)]
-    pub green_zones: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EnrichmentConfig {
-    pub enrichment_patterns: Vec<String>,
-}
-
 // ============================================================================
 // System Monitoring Types
 // ============================================================================
@@ -358,16 +383,25 @@ pub struct PolicyFileInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemInfo {
     pub authorized_patterns: usize,
+    #[serde(default)]
+    pub sudo_rules_count: usize,
     pub red_zones: usize,
     pub enrichment_patterns: usize,
     pub events_verified: u64,
     pub events_blocked: u64,
+    #[serde(default)]
+    pub sudo_events_verified: u64,
+    #[serde(default)]
+    pub sudo_events_blocked: u64,
     pub lineage_cache_size: usize,
     #[serde(default)]
     pub event_log_size_bytes: u64,
     #[serde(default)]
     pub audit_log_size_bytes: u64,
     pub ebpf_maps: std::collections::HashMap<String, MapStats>,
+    pub engine_enabled: bool,
+    pub file_protection_enabled: bool,
+    pub sudo_bypass_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -380,14 +414,6 @@ pub struct MapStats {
 // Log Management Types
 // ============================================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LogConfig {
-    pub event_log_retention_days: u32,
-    pub audit_log_retention_days: u32,
-    pub event_log_enabled: bool,
-    pub audit_log_enabled: bool,
-}
-
 // LogEntry is now imported from kprotect_common
 
 // ============================================================================
@@ -399,57 +425,57 @@ impl KprotectClient {
     pub async fn add_zone(&self, zone_type: &str, pattern: &str) -> Result<()> {
         let cmd = format!("ZONE_ADD;{};{}", zone_type, pattern);
         let response = self.send_command(&cmd).await?;
-        
+
         if !response.starts_with("OK") {
             anyhow::bail!("Failed to add zone: {}", response);
         }
-        
+
         Ok(())
     }
-    
+
     /// Remove a zone pattern
     pub async fn remove_zone(&self, zone_type: &str, pattern: &str) -> Result<()> {
         let cmd = format!("ZONE_REMOVE;{};{}", zone_type, pattern);
         let response = self.send_command(&cmd).await?;
-        
+
         if !response.starts_with("OK") {
             anyhow::bail!("Failed to remove zone: {}", response);
         }
-        
+
         Ok(())
     }
-    
+
     /// List all zones
     pub async fn list_zones(&self) -> Result<ZonesConfig> {
         let response = self.send_command("ZONE_LIST").await?;
         let json = self.parse_response(&response)?;
         serde_json::from_str(&json).context("Failed to parse zones")
     }
-    
+
     /// Add an enrichment pattern
     pub async fn add_enrichment_pattern(&self, pattern: &str) -> Result<()> {
         let cmd = format!("PATTERN_ADD;{}", pattern);
         let response = self.send_command(&cmd).await?;
-        
+
         if !response.starts_with("OK") {
             anyhow::bail!("Failed to add pattern: {}", response);
         }
-        
+
         Ok(())
     }
-    
+
     /// Remove an enrichment pattern
     pub async fn remove_enrichment_pattern(&self, pattern: &str) -> Result<()> {
         let cmd = format!("PATTERN_REMOVE;{}", pattern);
         let response = self.send_command(&cmd).await?;
-        
+
         if !response.starts_with("OK") {
             anyhow::bail!("Failed to remove pattern: {}", response);
         }
-        
+
         Ok(())
     }
-    
+
     /// List all enrichment patterns
     pub async fn list_enrichment_patterns(&self) -> Result<EnrichmentConfig> {
         let response = self.send_command("PATTERN_LIST").await?;
@@ -472,7 +498,7 @@ impl KprotectClient {
     pub async fn set_log_retention(&self, event_days: u32, audit_days: u32) -> Result<()> {
         let cmd = format!("SET_LOG_RETENTION;{};{}", event_days, audit_days);
         let response = self.send_command(&cmd).await?;
-        
+
         if response.starts_with("OK:") {
             Ok(())
         } else {
@@ -573,7 +599,7 @@ impl KprotectClient {
     /// Get notification statistics (computed client-side)
     pub async fn get_notification_stats(&self) -> Result<Vec<kprotect_common::NotificationStats>> {
         let rules = self.get_notification_rules().await?;
-        
+
         let stats = rules
             .iter()
             .map(|rule| {
@@ -583,13 +609,13 @@ impl KprotectClient {
                 } else {
                     0.0
                 };
-                
+
                 let avg_execution_ms = if total_triggers > 0 {
                     rule.total_execution_ms as f64 / total_triggers as f64
                 } else {
                     0.0
                 };
-                
+
                 kprotect_common::NotificationStats {
                     rule_id: rule.id,
                     rule_name: rule.name.clone(),
@@ -603,7 +629,7 @@ impl KprotectClient {
                 }
             })
             .collect();
-            
+
         Ok(stats)
     }
 
@@ -623,7 +649,7 @@ impl KprotectClient {
         let pattern_str = pattern.join(",");
         let cmd = format!("SUDO_ADD;{};{}", pattern_str, description);
         let response = self.send_command(&cmd).await?;
-        
+
         if response.starts_with("OK") {
             Ok(())
         } else {
@@ -636,7 +662,7 @@ impl KprotectClient {
         let pattern_str = pattern.join(",");
         let cmd = format!("SUDO_REMOVE;{}", pattern_str);
         let response = self.send_command(&cmd).await?;
-        
+
         if response.starts_with("OK") {
             Ok(())
         } else {
@@ -651,9 +677,9 @@ impl KprotectClient {
         } else {
             format!("CHECK_SUDO {}", pid)
         };
-        
+
         let response = self.send_command(&command).await?;
-        
+
         if response.starts_with("OK") {
             Ok(true)
         } else if response.starts_with("DENY") {
@@ -662,5 +688,75 @@ impl KprotectClient {
             anyhow::bail!("Unexpected response from daemon: {}", response)
         }
     }
-}
 
+    /// Clear all authorized patterns
+    pub async fn clear_patterns(&self) -> Result<()> {
+        let response = self.send_command("CLEAR_PATTERNS").await?;
+        if response.starts_with("OK") {
+            Ok(())
+        } else {
+            anyhow::bail!(response)
+        }
+    }
+
+    /// Clear all zone patterns
+    pub async fn clear_zones(&self) -> Result<()> {
+        let response = self.send_command("ZONE_CLEAR").await?;
+        if response.starts_with("OK") {
+            Ok(())
+        } else {
+            anyhow::bail!(response)
+        }
+    }
+
+    /// Clear all enrichment patterns
+    pub async fn clear_enrichment_patterns(&self) -> Result<()> {
+        let response = self.send_command("PATTERN_CLEAR").await?;
+        if response.starts_with("OK") {
+            Ok(())
+        } else {
+            anyhow::bail!(response)
+        }
+    }
+
+    /// Clear all sudo rules
+    pub async fn clear_sudo_rules(&self) -> Result<()> {
+        let response = self.send_command("SUDO_CLEAR").await?;
+        if response.starts_with("OK") {
+            Ok(())
+        } else {
+            anyhow::bail!(response)
+        }
+    }
+
+    /// Clear all notification rules
+    pub async fn clear_notification_rules(&self) -> Result<()> {
+        let response = self.send_command("CLEAR_NOTIFY_RULES").await?;
+        if response.starts_with("OK") {
+            Ok(())
+        } else {
+            anyhow::bail!(response)
+        }
+    }
+
+    /// Export the entire configuration as a JSON string
+    pub async fn export_config(&self) -> Result<String> {
+        let response = self.send_command("EXPORT_CONFIG").await?;
+        if let Some(json) = response.strip_prefix("OK: ") {
+            Ok(json.trim().to_string())
+        } else {
+            anyhow::bail!("Export failed: {}", response)
+        }
+    }
+
+    /// Import the entire configuration from a JSON string
+    pub async fn import_config(&self, json: &str) -> Result<()> {
+        let command = format!("IMPORT_CONFIG {}", json);
+        let response = self.send_command(&command).await?;
+        if response.starts_with("OK") {
+            Ok(())
+        } else {
+            anyhow::bail!("Import failed: {}", response)
+        }
+    }
+}

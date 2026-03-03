@@ -1,0 +1,97 @@
+name: kprotect Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    permissions:
+      contents: write
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: kprotect-ui/package-lock.json
+
+      - name: Install Rust Stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Install Rust Stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Install Rust Nightly (for eBPF)
+        run: |
+          rustup toolchain install nightly --profile minimal -c rust-src
+          rustup default stable
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            llvm \
+            clang \
+            libelf-dev \
+            libbpf-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+
+      - name: Build eBPF Programs
+        run: cargo xtask build-ebpf --release
+
+      - name: Build Core Binaries and Package
+        run: |
+          cargo build --release
+          cd kprotect-daemon
+          cargo deb --no-build --output ../target/kprotect-core.deb
+          cd ..
+
+      - name: Install Frontend Dependencies
+        run: |
+          cd kprotect-ui
+          npm install
+          cd ..
+
+      - name: Build and Release Tauri GUI
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: kprotect-ui
+          tagName: ${{ github.ref_name }}
+          releaseName: "kprotect ${{ github.ref_name }}"
+          releaseBody: "Automated release for kprotect."
+          releaseDraft: true
+          prerelease: false
+          args: --target x86_64-unknown-linux-gnu
+
+      - name: Upload Core Debian Package to Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: target/kprotect-core.deb
+          tag_name: ${{ github.ref_name }}
+          draft: true

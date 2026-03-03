@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { api } from '../api';
-import { Save, History, Shield, Clock, CheckCircle2, AlertCircle, RefreshCw, User } from 'lucide-react';
+import { Save, History, Shield, Clock, CheckCircle2, AlertCircle, RefreshCw, User, Download, Upload, FileJson } from 'lucide-react';
 import { toast } from 'sonner';
 import { useGlobal } from '../context/GlobalContext';
 
@@ -14,6 +14,8 @@ export function Settings() {
 
     const [eventsRetention, setEventsRetention] = useState(30);
     const [auditRetention, setAuditRetention] = useState(90);
+    const [engineEnabled, setEngineEnabled] = useState(true);
+    const [togglingEngine, setTogglingEngine] = useState(false);
 
     // Infinite Scroll Intersection Observer
     const observer = useRef<IntersectionObserver | null>(null);
@@ -38,14 +40,32 @@ export function Settings() {
     const loadConfig = async () => {
         setLoading(true);
         try {
-            const cfg = await api.getLogConfig();
+            const [cfg, system] = await Promise.all([
+                api.getLogConfig(),
+                api.getSystemInfo()
+            ]);
             setEventsRetention(cfg.event_log_retention_days);
             setAuditRetention(cfg.audit_log_retention_days);
+            setEngineEnabled(system.engine_enabled);
         } catch (e) {
             console.error(e);
             toast.error("Failed to load settings");
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleToggleEngine = async () => {
+        if (togglingEngine || !isRootActive) return;
+        setTogglingEngine(true);
+        try {
+            await api.setEngineEnabled(!engineEnabled);
+            setEngineEnabled(!engineEnabled);
+            toast.success(`Engine ${!engineEnabled ? 'enabled' : 'paused'}`);
+        } catch (e) {
+            toast.error(`Toggle failed: ${e}`);
+        } finally {
+            setTogglingEngine(false);
         }
     };
 
@@ -67,12 +87,126 @@ export function Settings() {
         }
     };
 
+    const handleExport = async () => {
+        if (!isRootActive) {
+            toast.error("Root session required to export configuration");
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const json = await api.exportConfig();
+
+            // Basic validation to ensure we got valid JSON back before trying to save
+            try {
+                JSON.parse(json);
+            } catch (e) {
+                console.error("Invalid JSON received:", json);
+                throw new Error("Received invalid configuration format from daemon");
+            }
+
+            // In Tauri, programmatic a.click() downloads are often intercepted or blocked.
+            // We use the Tauri dialog API to prompt the user for a save location.
+            const { save } = await import('@tauri-apps/plugin-dialog');
+            const { writeTextFile } = await import('@tauri-apps/plugin-fs');
+
+            const filePath = await save({
+                filters: [{
+                    name: 'JSON Configuration',
+                    extensions: ['json']
+                }],
+                defaultPath: `kprotect-backup-${new Date().toISOString().split('T')[0]}.json`
+            });
+
+            if (filePath) {
+                await writeTextFile(filePath, json);
+                toast.success("Configuration exported successfully");
+            } else {
+                toast.info("Export cancelled");
+            }
+        } catch (e) {
+            toast.error(`Export failed: ${e}`);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !isRootActive) return;
+
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            const content = event.target?.result as string;
+            setLoading(true);
+            try {
+                await api.importConfig(content);
+                toast.success("Configuration imported successfully");
+                await loadConfig();
+            } catch (err) {
+                toast.error(`Import failed: ${err}`);
+            } finally {
+                setLoading(false);
+                // Reset file input
+                e.target.value = '';
+            }
+        };
+        reader.readAsText(file);
+    };
+
     if (loading) {
         return <div className="p-8 text-center text-zinc-500">Loading settings...</div>;
     }
 
     return (
         <div className="space-y-12 pb-20">
+            {/* System Engine Toggle */}
+            <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="flex items-center space-x-3 mb-6 px-1">
+                    <div className="p-2.5 bg-zinc-900 text-white rounded-xl shadow-sm">
+                        <RefreshCw size={22} className={togglingEngine ? "animate-spin" : ""} />
+                    </div>
+                    <div>
+                        <h3 className="text-lg font-bold text-zinc-900 tracking-tight">System Engine</h3>
+                        <p className="text-sm text-zinc-500 font-medium">Master control for the kprotect core processing engine.</p>
+                    </div>
+                </div>
+
+                <div className="bg-white border border-zinc-200 rounded-2xl overflow-hidden shadow-sm">
+                    <div className="p-6 sm:p-8 flex items-center justify-between">
+                        <div className="space-y-1">
+                            <h4 className="font-bold text-zinc-900">Protection Master Switch</h4>
+                            <p className="text-sm text-zinc-500 max-w-lg">
+                                When disabled, the daemon enters a passive monitoring mode. Lineage is tracked, but no blocking or automatic sudo authorizations will occur.
+                            </p>
+                        </div>
+                        <div className="flex flex-col items-end space-y-4">
+                            <button
+                                onClick={handleToggleEngine}
+                                disabled={!isRootActive || togglingEngine}
+                                className={`relative inline-flex h-8 w-14 items-center rounded-full transition-all focus:outline-none ${!isRootActive ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'} ${engineEnabled ? 'bg-indigo-600' : 'bg-zinc-200'}`}
+                            >
+                                <span
+                                    className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ${engineEnabled ? 'translate-x-7' : 'translate-x-1'} flex items-center justify-center`}
+                                >
+                                    {togglingEngine && <div className="w-3 h-3 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />}
+                                </span>
+                            </button>
+                            <span className={`text-[10px] font-black uppercase tracking-widest ${engineEnabled ? 'text-indigo-600' : 'text-zinc-400'}`}>
+                                {engineEnabled ? 'Engine Active' : 'Engine Paused'}
+                            </span>
+                        </div>
+                    </div>
+                    {!isRootActive && (
+                        <div className="px-6 pb-6 pt-0">
+                            <ContextualUnlock
+                                description="Changing engine state requires an active root session."
+                            />
+                        </div>
+                    )}
+                </div>
+            </section>
+
             {/* Retention Settings */}
             <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="flex items-center space-x-3 mb-6 px-1">
@@ -148,8 +282,66 @@ export function Settings() {
                 </div>
             </section>
 
+            {/* Backup & Restore */}
+            <section className="animate-in fade-in slide-in-from-bottom-4 duration-500 delay-200">
+                <div className="flex items-center space-x-3 mb-6 px-1">
+                    <div className="p-2.5 bg-zinc-900 text-white rounded-xl shadow-sm">
+                        <FileJson size={22} />
+                    </div>
+                    <div>
+                        <h3 className="text-lg font-bold text-zinc-900 tracking-tight">Backup & Restore</h3>
+                        <p className="text-sm text-zinc-500 font-medium">Export current configuration or restore from a backup file.</p>
+                    </div>
+                </div>
+
+                <div className="bg-white border border-zinc-200 rounded-2xl overflow-hidden shadow-sm">
+                    <div className="p-6 sm:p-8">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <button
+                                onClick={handleExport}
+                                disabled={!isRootActive}
+                                className={`flex flex-col items-center justify-center p-8 bg-zinc-50 border border-zinc-200 rounded-2xl transition-all group ${!isRootActive ? 'opacity-50 cursor-not-allowed' : 'hover:bg-zinc-100 cursor-pointer'}`}
+                            >
+                                <div className="p-4 bg-white rounded-2xl shadow-sm mb-4 group-hover:scale-110 transition-transform">
+                                    <Download size={32} className={isRootActive ? "text-indigo-600" : "text-zinc-400"} />
+                                </div>
+                                <h4 className="font-bold text-zinc-900 mb-1">Export Configuration</h4>
+                                <p className="text-xs text-zinc-500 text-center">Save all your rules, zones, and settings to a JSON file.</p>
+                            </button>
+
+                            <div className="relative">
+                                <label
+                                    className={`flex flex-col items-center justify-center p-8 bg-zinc-50 border border-zinc-200 rounded-2xl transition-all group ${!isRootActive ? 'opacity-50 cursor-not-allowed' : 'hover:bg-zinc-100 cursor-pointer'}`}
+                                >
+                                    <input
+                                        type="file"
+                                        accept=".json"
+                                        onChange={handleImport}
+                                        disabled={!isRootActive}
+                                        className="hidden"
+                                    />
+                                    <div className="p-4 bg-white rounded-2xl shadow-sm mb-4 group-hover:scale-110 transition-transform">
+                                        <Upload size={32} className="text-zinc-600" />
+                                    </div>
+                                    <h4 className="font-bold text-zinc-900 mb-1">Import Configuration</h4>
+                                    <p className="text-xs text-zinc-500 text-center">Restore system state from a previously exported JSON backup.</p>
+                                </label>
+                            </div>
+                        </div>
+
+                        {!isRootActive && (
+                            <div className="mt-6">
+                                <ContextualUnlock
+                                    description="Importing configuration requires an active root session to apply changes."
+                                />
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </section>
+
             {/* Audit History */}
-            <section className="animate-in fade-in slide-in-from-bottom-4 duration-500 delay-150">
+            <section className="animate-in fade-in slide-in-from-bottom-4 duration-500 delay-300">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 px-1 gap-4">
                     <div className="flex items-center space-x-3">
                         <div className="p-2.5 bg-zinc-100 text-zinc-600 rounded-xl shadow-sm">

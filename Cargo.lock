@@ -953,6 +953,7 @@ dependencies = [
  "kprotect-client",
  "kprotect-common",
  "libc",
+ "serde",
  "serde_json",
  "tabled",
  "tokio",
@@ -971,7 +972,7 @@ dependencies = [
 
 [[package]]
 name = "kprotect-common"
-version = "0.1.0-beta"
+version = "0.2.0-beta"
 dependencies = [
  "serde",
  "serde-big-array",
@@ -980,7 +981,7 @@ dependencies = [
 
 [[package]]
 name = "kprotect-daemon"
-version = "0.1.0-beta"
+version = "0.2.0-beta"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -998,9 +999,11 @@ dependencies = [
  "nix",
  "rand",
  "reqwest",
+ "sd-notify",
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "tokio",
 ]
 
@@ -1514,6 +1517,15 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+
+[[package]]
+name = "sd-notify"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b943eadf71d8b69e661330cb0e2656e31040acf21ee7708e2c238a0ec6af2bf4"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "security-framework"

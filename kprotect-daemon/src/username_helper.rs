@@ -2,11 +2,11 @@
 fn get_username_from_socket(stream: &std::os::unix::net::UnixStream) -> String {
     use nix::sys::socket::{getsockopt, sockopt::PeerCred};
     use std::os::unix::io::AsRawFd;
-    
+
     match getsockopt(stream.as_raw_fd(), PeerCred) {
         Ok(creds) => {
             let uid = creds.uid();
-            
+
             // Try to get username from UID
             unsafe {
                 let pw = libc::getpwuid(uid);
@@ -17,7 +17,7 @@ fn get_username_from_socket(stream: &std::os::unix::net::UnixStream) -> String {
                     }
                 }
             }
-            
+
             // Fallback to uid:N
             format!("uid:{}", uid)
         }

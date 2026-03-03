@@ -126,3 +126,6 @@ gui_automation_test/
 .cargo/config.toml.bak
 kprotect-tui/
 *.deb
+handoff*
+scripts/test_local/
+session_handoff/

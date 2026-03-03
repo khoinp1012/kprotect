@@ -26,7 +26,7 @@ async fn send_root_command(cmd: &str) -> Result<String, String> {
 
     // Clear any stale response
     *PENDING_RESPONSE.lock().unwrap() = None;
-    
+
     // Send command to worker (in its own scope to ensure guard is dropped)
     {
         let mut guard = ROOT_WORKER.lock().unwrap();
@@ -42,17 +42,17 @@ async fn send_root_command(cmd: &str) -> Result<String, String> {
             return Err("Root session not active".to_string());
         }
     } // guard is dropped here
-    
+
     // Poll for response with 2-second timeout (20 * 100ms)
     for _ in 0..20 {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        
+
         // Check if response arrived
         if let Some(response) = PENDING_RESPONSE.lock().unwrap().take() {
             return parse_cli_response(&response);
         }
     }
-    
+
     Err("Timeout: CLI worker did not respond within 2 seconds".to_string())
 }
 
@@ -60,17 +60,17 @@ fn parse_cli_response(json: &str) -> Result<String, String> {
     // Parse the JSON response from CLI
     let parsed: serde_json::Value = serde_json::from_str(json)
         .map_err(|e| format!("Failed to parse CLI response: {}", e))?;
-    
+
     // Handle array responses (like list_auth which returns the array directly)
     if parsed.is_array() {
         println!("DEBUG [parse_cli_response]: Got array response, returning as-is");
         return Ok(json.to_string());
     }
-    
+
     // Handle object responses with status field
     if let Some(status) = parsed.get("status").and_then(|s| s.as_str()) {
         match status {
-            "ok" => Ok("Success".to_string()),
+            "ok" => Ok(json.to_string()),
             "error" => {
                 let message = parsed.get("message")
                     .and_then(|m| m.as_str())
@@ -95,9 +95,9 @@ async fn authorize_pattern(pattern: Vec<String>, mode: String, description: Opti
         // Pattern is joined by commas
         let pattern_str = pattern.join(",");
         let desc = description.unwrap_or_else(|| "No description".to_string());
-        
+
         let cmd = format!("authorize;{};{};{}", pattern_str, mode, desc);
-        
+
         return send_root_command(&cmd)
             .await
             .map(|_| ());
@@ -115,7 +115,7 @@ async fn revoke_pattern(pattern: Vec<String>, match_mode: String) -> Result<(), 
     if WORKER_READY.load(Ordering::Relaxed) {
         let pattern_str = pattern.join(",");
         let cmd = format!("REVOKE_PATTERN;{};{}", pattern_str, match_mode);
-        
+
         return send_root_command(&cmd)
             .await
             .map(|_| ());
@@ -245,7 +245,7 @@ async fn get_security_events(count: usize, offset: usize) -> Result<serde_json::
 
 #[tauri::command]
 async fn get_audit_logs(count: usize, offset: usize) -> Result<serde_json::Value, String> {
-    // Audit logs might contain sensitive info, but since we are in the kprotect group, 
+    // Audit logs might contain sensitive info, but since we are in the kprotect group,
     // the daemon will allow us to read them.
     let client = KprotectClient::new();
     let logs = client.get_audit(count, offset).await.map_err(|e| e.to_string())?;
@@ -259,7 +259,7 @@ async fn get_notification_rules() -> Result<serde_json::Value, String> {
         serde_json::from_str(&response).map_err(|e| format!("Failed to parse notification rules: {}", e))
     } else {
         // Fallback to direct client (readonly allowed for kprotect group)
-        // BUGFIX: The daemon dispatcher expects LIST_NOTIFY_RULES, but the client library might be using 
+        // BUGFIX: The daemon dispatcher expects LIST_NOTIFY_RULES, but the client library might be using
         // a different naming convention or internal mapping. We'll use the direct command if possible.
         let client = KprotectClient::new();
         match client.get_notification_rules().await {
@@ -288,7 +288,7 @@ async fn add_notification_rule(
         let cmd = format!("notify_add;{};{};{};{};{};{}", name, events, path_str, action, dest, timeout);
         return send_root_command(&cmd).await.map(|_| ());
     }
-    
+
     // Fallback path
     let client = KprotectClient::new();
     let event_filters: Vec<kprotect_common::EventTypeFilter> = events.split(',')
@@ -297,7 +297,7 @@ async fn add_notification_rule(
             _ => kprotect_common::EventTypeFilter::Blocked,
         })
         .collect();
-    
+
     let action_type = match action.to_lowercase().as_str() {
         "script" => kprotect_common::ActionType::Script,
         _ => kprotect_common::ActionType::Webhook,
@@ -314,7 +314,7 @@ async fn remove_notification_rule(id: u32) -> Result<(), String> {
         let cmd = format!("notify_remove;{}", id);
         return send_root_command(&cmd).await.map(|_| ());
     }
-    
+
     let client = KprotectClient::new();
     client.remove_notification_rule(id).await.map_err(|e| e.to_string())
 }
@@ -325,7 +325,7 @@ async fn toggle_notification_rule(id: u32, enabled: bool) -> Result<(), String> 
         let cmd = format!("notify_toggle;{};{}", id, enabled);
         return send_root_command(&cmd).await.map(|_| ());
     }
-    
+
     let client = KprotectClient::new();
     client.toggle_notification_rule(id, enabled).await.map_err(|e| e.to_string())
 }
@@ -333,14 +333,14 @@ async fn toggle_notification_rule(id: u32, enabled: bool) -> Result<(), String> 
 #[tauri::command]
 async fn get_patterns() -> Result<serde_json::Value, String> {
     println!("DEBUG [get_patterns]: Starting get_patterns command");
-    
+
     // Try root worker first (priority)
     if WORKER_READY.load(Ordering::Relaxed) {
         println!("DEBUG [get_patterns]: Root worker is ready, sending list_auth command");
         let response = send_root_command("list_auth").await?;
-        
+
         println!("DEBUG [get_patterns]: Received response from root worker: {}", response);
-        
+
         // Parse the JSON response
         match serde_json::from_str(&response) {
             Ok(parsed) => {
@@ -380,7 +380,7 @@ async fn add_sudo_rule(pattern: Vec<String>, description: String) -> Result<(), 
         let cmd = format!("SUDO_ADD;{};{}", pattern_str, description);
         return send_root_command(&cmd).await.map(|_| ());
     }
-    
+
     let client = KprotectClient::new();
     client.add_sudo_rule(&pattern, &description).await.map_err(|e| e.to_string())
 }
@@ -392,15 +392,71 @@ async fn remove_sudo_rule(pattern: Vec<String>) -> Result<(), String> {
         let cmd = format!("SUDO_REMOVE;{}", pattern_str);
         return send_root_command(&cmd).await.map(|_| ());
     }
-    
+
     let client = KprotectClient::new();
     client.remove_sudo_rule(&pattern).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
+async fn set_engine_enabled(enabled: bool) -> Result<(), String> {
+    if WORKER_READY.load(Ordering::Relaxed) {
+        let cmd = format!("SET_ENGINE;{}", enabled);
+        return send_root_command(&cmd).await.map(|_| ());
+    }
+    Err("Root session required to change system settings".to_string())
+}
+
+#[tauri::command]
+async fn set_file_protection(enabled: bool) -> Result<(), String> {
+    if WORKER_READY.load(Ordering::Relaxed) {
+        let cmd = format!("SET_FILE_PROTECTION;{}", enabled);
+        return send_root_command(&cmd).await.map(|_| ());
+    }
+    Err("Root session required to change system settings".to_string())
+}
+
+#[tauri::command]
+async fn set_sudo_bypass(enabled: bool) -> Result<(), String> {
+    if WORKER_READY.load(Ordering::Relaxed) {
+        let cmd = format!("SET_SUDO_BYPASS;{}", enabled);
+        return send_root_command(&cmd).await.map(|_| ());
+    }
+    Err("Root session required to change system settings".to_string())
+}
+
+#[tauri::command]
+async fn export_config() -> Result<String, String> {
+    if WORKER_READY.load(Ordering::Relaxed) {
+        let response = send_root_command("config_export").await?;
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&response) {
+            if let Some(config) = parsed.get("config") {
+                if let Some(config_str) = config.as_str() {
+                    return Ok(config_str.to_string());
+                }
+                // Fallback if config isn't a string (e.g. native JSON object)
+                return Ok(config.to_string());
+            }
+        }
+        return Ok(response);
+    }
+
+    let client = KprotectClient::new();
+    client.export_config().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn import_config(json: String) -> Result<(), String> {
+    if WORKER_READY.load(Ordering::Relaxed) {
+        let cmd = format!("config_import;{}", json);
+        return send_root_command(&cmd).await.map(|_| ());
+    }
+    Err("Root session required for configuration import".to_string())
+}
+
+#[tauri::command]
 async fn check_root_worker_status() -> Result<bool, String> {
     let mut guard = ROOT_WORKER.lock().unwrap();
-    
+
     if let Some(child) = guard.as_mut() {
         // Check if process is still alive
         match child.try_wait() {
@@ -424,16 +480,16 @@ async fn check_root_worker_status() -> Result<bool, String> {
 #[tauri::command]
 async fn stop_root_worker() -> Result<(), String> {
     let mut guard = ROOT_WORKER.lock().unwrap();
-    
+
     if let Some(mut child) = guard.take() {
         // Reset ready flag immediately
         WORKER_READY.store(false, Ordering::Relaxed);
-        
+
         // Try graceful termination first (SIGTERM equivalent via kill())
         match child.kill() {
             Ok(_) => {
                 println!("DEBUG: Sent kill signal to root worker");
-                
+
                 // Wait for process to exit (with timeout)
                 let mut attempts = 0;
                 while attempts < 10 {
@@ -452,7 +508,7 @@ async fn stop_root_worker() -> Result<(), String> {
                         }
                     }
                 }
-                
+
                 // If we reach here, process didn't exit gracefully
                 // Force kill by dropping the Child handle (this triggers SIGKILL on drop)
                 drop(child);
@@ -479,12 +535,12 @@ async fn start_root_session() -> Result<String, String> {
     // "Start Root Session" spawns a persistent background worker running as root.
     // This worker listens for commands via STDIN.
     // This achieves the "Auth Once, Run Many" behavior requested.
-    
+
     let mut guard = ROOT_WORKER.lock().unwrap();
-    
+
     // Reset ready flag before starting new worker
     WORKER_READY.store(false, Ordering::Relaxed);
-    
+
     // Check if alive
     if let Some(child) = guard.as_mut() {
         if let Ok(Some(_)) = child.try_wait() {
@@ -494,16 +550,16 @@ async fn start_root_session() -> Result<String, String> {
              return Ok("Root session already active.".to_string());
         }
     }
-    
+
     // Determine path to kprotect-cli
     // Try multiple possible locations for better reliability
-    
+
     let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
     println!("DEBUG: Current executable: {:?}", current_exe);
-    
+
     // Build list of possible CLI locations
     let mut possible_paths = Vec::new();
-    
+
     // Dev mode: workspace/target/debug/kprotect-cli
     // Current exe is at: kprotect-ui/src-tauri/target/debug/kprotect-ui
     // Go up 5 levels to workspace root
@@ -518,11 +574,11 @@ async fn start_root_session() -> Result<String, String> {
         possible_paths.push(workspace.join("target/release/kprotect-cli"));
         possible_paths.push(workspace.join("target/debug/kprotect-cli"));
     }
-    
+
     // System installation
     possible_paths.push(std::path::PathBuf::from("/usr/local/bin/kprotect-cli"));
     possible_paths.push(std::path::PathBuf::from("/usr/bin/kprotect-cli"));
-    
+
     // Find first existing CLI binary
     let mut cli_path = None;
     for path in &possible_paths {
@@ -535,7 +591,7 @@ async fn start_root_session() -> Result<String, String> {
             println!("DEBUG: ✗ Not found at: {:?}", path);
         }
     }
-    
+
     let cli_path = cli_path.ok_or_else(|| {
         format!(
             "kprotect-cli binary not found. Searched locations:\n{}",
@@ -545,10 +601,10 @@ async fn start_root_session() -> Result<String, String> {
                 .join("\n")
         )
     })?;
-        
+
     // Debug log to console (visible in terminal where tauri dev is running)
     println!("DEBUG: Using CLI binary: {:?}", cli_path);
-        
+
     let cli_path_str = cli_path.to_str().ok_or("Invalid path")?;
 
     // Spawn pkexec
@@ -561,7 +617,7 @@ async fn start_root_session() -> Result<String, String> {
         .stderr(Stdio::piped()) // Capture stderr to check for errors
         .spawn()
         .map_err(|e| format!("Failed to start root worker (pkexec): {}. Make sure pkexec is installed.", e))?;
-    
+
     // Take stdout to read the "ready" message
     if let Some(stdout) = child.stdout.take() {
         // Spawn background task to wait for ready message
@@ -569,7 +625,7 @@ async fn start_root_session() -> Result<String, String> {
             use tokio::io::BufReader;
             let mut reader = BufReader::new(tokio::process::ChildStdout::from_std(stdout).unwrap());
             let mut line = String::new();
-            
+
             // Continuously read lines from worker
             loop {
                 line.clear();
@@ -584,7 +640,7 @@ async fn start_root_session() -> Result<String, String> {
                     Ok(_) => {
                         let trimmed = line.trim();
                         println!("DEBUG: Worker output: {}", trimmed);
-                        
+
                         // Check for ready message
                         if trimmed.contains("\"status\": \"ready\"") {
                             println!("DEBUG: Worker is ready!");
@@ -608,11 +664,11 @@ async fn start_root_session() -> Result<String, String> {
             }
         });
     }
-    
+
     // Store the worker immediately (stdout was taken above)
     *guard = Some(child);
     println!("DEBUG: pkexec spawned, waiting for worker ready message...");
-    
+
     Ok("Root worker spawned. Complete authentication when prompted.".to_string())
 }
 
@@ -621,8 +677,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
-            authorize_pattern, 
+            authorize_pattern,
             revoke_pattern,
             get_patterns,
             get_zones,
@@ -649,11 +707,16 @@ pub fn run() {
             get_resource_usage,
             get_sudo_rules,
             add_sudo_rule,
-            remove_sudo_rule
+            remove_sudo_rule,
+            set_engine_enabled,
+            set_file_protection,
+            set_sudo_bypass,
+            export_config,
+            import_config
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
-            
+
             // Spawn background event listener
             tauri::async_runtime::spawn(async move {
                 loop {
@@ -665,10 +728,10 @@ pub fn run() {
                                 eprintln!("Failed to subscribe to events: {}", e);
                                 continue;
                             }
-                            
+
                             let mut reader = tokio::io::BufReader::new(stream);
                             let mut line = String::new();
-                            
+
                             loop {
                                 line.clear();
                                 match reader.read_line(&mut line).await {
@@ -679,7 +742,7 @@ pub fn run() {
                                             // Emit event to frontend
                                             println!("DEBUG: Emitting event to frontend: {}", line.trim());
                                             let _ = app_handle.emit("event", json.clone());
-                                            
+
                                             // NOTE: Notifications are now controlled by the frontend toggle system
                                             // The hardcoded backend notification has been removed to respect user preferences
                                         }
@@ -696,7 +759,7 @@ pub fn run() {
                     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                 }
             });
-            
+
             Ok(())
         })
         .run(tauri::generate_context!())

@@ -1,6 +1,14 @@
 #!/bin/bash
 set -e
 
+# --- Root Check ---
+# GUI builds should NOT be run as root to avoid permission issues in node_modules/target
+if [[ $EUID -eq 0 ]]; then
+   echo "Error: This script should NOT be run as root/sudo."
+   echo "Please run as a normal user."
+   exit 1
+fi
+
 echo "Building kprotect GUI for release..."
 
 # Resolve project root

@@ -51,6 +51,13 @@ export const api = {
 
     // Resource Usage
     getResourceUsage: () => invoke<SystemStats>('get_resource_usage'),
+
+    // Engine Toggles
+    setEngineEnabled: (enabled: boolean) => invoke('set_engine_enabled', { enabled }),
+    setFileProtection: (enabled: boolean) => invoke('set_file_protection', { enabled }),
+    setSudoBypass: (enabled: boolean) => invoke('set_sudo_bypass', { enabled }),
+    exportConfig: () => invoke<string>('export_config'),
+    importConfig: (json: string) => invoke('import_config', { json }),
 };
 
 export interface ResourceUsage {
@@ -95,12 +102,18 @@ export interface EncryptionInfo {
 
 export interface SystemInfo {
     authorized_patterns: number;
+    sudo_rules_count: number;
     red_zones: number;
     enrichment_patterns: number;
     events_verified: number;
     events_blocked: number;
+    sudo_events_verified: number;
+    sudo_events_blocked: number;
     lineage_cache_size: number;
     event_log_size_bytes: number;
     audit_log_size_bytes: number;
     ebpf_maps: Record<string, { size: number; capacity: number }>;
+    engine_enabled: boolean;
+    file_protection_enabled: boolean;
+    sudo_bypass_enabled: boolean;
 }

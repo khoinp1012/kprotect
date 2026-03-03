@@ -27,8 +27,8 @@ use kprotect_daemon::server::startup;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use tokio::net::UnixStream;
 use tokio::io::AsyncWriteExt;
+use tokio::net::UnixStream;
 
 #[cfg(not(debug_assertions))]
 const SOCKET_PATH: &str = "/run/kprotect/kprotect.sock";
@@ -84,7 +84,7 @@ async fn send_socket_command(cmd: &str) -> Result<()> {
     } else {
         format!("{}\n", cmd)
     };
-    
+
     stream.write_all(cmd.as_bytes()).await?;
     stream.shutdown().await?;
     Ok(())

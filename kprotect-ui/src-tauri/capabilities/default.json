@@ -8,6 +8,9 @@
   "permissions": [
     "core:default",
     "opener:default",
-    "notification:default"
+    "notification:default",
+    "dialog:allow-save",
+    "fs:allow-write-text-file",
+    "fs:allow-exists"
   ]
 }

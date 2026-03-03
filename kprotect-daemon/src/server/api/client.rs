@@ -1,21 +1,17 @@
 use anyhow::Result;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
-use tokio::io::{AsyncWriteExt, BufReader, AsyncBufReadExt};
 
-use crate::state::AppState;
 use super::handlers::*;
+use crate::state::AppState;
 
-pub async fn handle_client(stream: UnixStream, state: Arc<Mutex<AppState>>) -> Result<()> {
+pub async fn handle_client(stream: UnixStream, state: Arc<AppState>) -> Result<()> {
     let peer_creds = stream.peer_cred()?;
     let caller_uid = peer_creds.uid();
 
     let mut is_subscribed = false;
-    let mut rx = {
-        let state_lock = state.lock().await;
-        state_lock.event_tx.subscribe()
-    };
+    let mut rx = state.event_tx.subscribe();
 
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
@@ -25,11 +21,11 @@ pub async fn handle_client(stream: UnixStream, state: Arc<Mutex<AppState>>) -> R
         tokio::select! {
             n = reader.read_line(&mut line) => {
                 let n = n?;
-                if n == 0 { break; } 
-                
+                if n == 0 { break; }
+
                 let cmd = line.trim().to_string();
                 line.clear();
-                
+
                 if cmd.is_empty() { continue; }
 
                 let response = match cmd.as_str() {
@@ -37,16 +33,19 @@ pub async fn handle_client(stream: UnixStream, state: Arc<Mutex<AppState>>) -> R
                     c if c.starts_with("AUTHORIZE") => auth::handle_authorize(&state, c, caller_uid).await?,
                     "LIST_PATTERNS" => auth::handle_list_auth(&state).await?,
                     c if c.starts_with("REVOKE_PATTERN") => auth::handle_revoke(&state, c, caller_uid).await?,
-                    
+                    "CLEAR_PATTERNS" => auth::handle_clear(&state, caller_uid).await?,
+
                     // Zone Handlers
                     c if c.starts_with("ZONE_ADD") => rules::handle_zone_add(&state, c, caller_uid).await?,
                     c if c.starts_with("ZONE_REMOVE") => rules::handle_zone_remove(&state, c, caller_uid).await?,
                     "ZONE_LIST" => rules::handle_zone_list(&state).await?,
-                    
+                    "ZONE_CLEAR" => rules::handle_zone_clear(&state, caller_uid).await?,
+
                     // Enrichment Handlers
                     c if c.starts_with("PATTERN_ADD") => rules::handle_pattern_add(&state, c, caller_uid).await?,
                     c if c.starts_with("PATTERN_REMOVE") => rules::handle_pattern_remove(&state, c, caller_uid).await?,
                     "PATTERN_LIST" => rules::handle_pattern_list(&state).await?,
+                    "PATTERN_CLEAR" => rules::handle_pattern_clear(&state, caller_uid).await?,
 
                     // Metrics & System Handlers
                     "STATS" | "GET_STATS" => metrics::handle_stats(&state).await?,
@@ -55,12 +54,13 @@ pub async fn handle_client(stream: UnixStream, state: Arc<Mutex<AppState>>) -> R
                     "CAPABILITIES" => metrics::handle_capabilities(&state).await?,
                     "ENCRYPTION_INFO" => metrics::handle_encryption_info(&state).await?,
                     "GET_LOG_CONFIG" => metrics::handle_get_log_config(&state).await?,
-                    
+
                     // Notification Handlers
                     "LIST_NOTIFY_RULES" => notifications::handle_notify_list(&state).await?,
                     c if c.starts_with("ADD_NOTIFY_RULE") => notifications::handle_notify_add(&state, c, caller_uid).await?,
                     c if c.starts_with("REMOVE_NOTIFY_RULE") => notifications::handle_notify_remove(&state, c, caller_uid).await?,
                     c if c.starts_with("TOGGLE_NOTIFY_RULE") => notifications::handle_notify_toggle(&state, c, caller_uid).await?,
+                    "CLEAR_NOTIFY_RULES" => notifications::handle_notify_clear(&state, caller_uid).await?,
 
                     // Logs Handlers
                     c if c.starts_with("GET_EVENTS") => {
@@ -88,12 +88,20 @@ pub async fn handle_client(stream: UnixStream, state: Arc<Mutex<AppState>>) -> R
                             "ERROR: INVALID_SYNTAX: Invalid signature format\n".to_string()
                         }
                     },
-                    
+
                     // Sudo Bypass Handlers
                     c if c.starts_with("CHECK_SUDO ") => sudo::handle_check_sudo(&state, c).await?,
                     c if c.starts_with("SUDO_ADD") => sudo::handle_sudo_add(&state, c, caller_uid).await?,
                     c if c.starts_with("SUDO_REMOVE") => sudo::handle_sudo_remove(&state, c, caller_uid).await?,
                     "SUDO_LIST" => sudo::handle_sudo_list(&state).await?,
+                    "SUDO_CLEAR" => sudo::handle_sudo_clear(&state, caller_uid).await?,
+
+                    // Configuration Handlers
+                    c if c.starts_with("SET_ENGINE") => config::handle_set_engine(&state, c, caller_uid).await?,
+                    c if c.starts_with("SET_FILE_PROTECTION") => config::handle_set_file_protection(&state, c, caller_uid).await?,
+                    c if c.starts_with("SET_SUDO_BYPASS") => config::handle_set_sudo_bypass(&state, c, caller_uid).await?,
+                    "EXPORT_CONFIG" => config::handle_export_config(&state).await?,
+                    c if c.starts_with("IMPORT_CONFIG ") => config::handle_import_config(&state, c, caller_uid).await?,
 
                     // Basic Handlers
                     "PING" => "OK: PONG\n".to_string(),
@@ -102,7 +110,7 @@ pub async fn handle_client(stream: UnixStream, state: Arc<Mutex<AppState>>) -> R
                         is_subscribed = true;
                         "OK: Subscribed to live events (batched)\n".to_string()
                     },
-                    "HELP" => "OK: Available commands: AUTHORIZE, LIST_PATTERNS, REVOKE_PATTERN, ZONE_ADD, ZONE_REMOVE, ZONE_LIST, PATTERN_ADD, PATTERN_REMOVE, PATTERN_LIST, STATS, STATUS, SYSTEM_INFO, ENCRYPTION_INFO, GET_LOG_CONFIG, GET_EVENTS, GET_AUDIT, INSPECT, CHECK_SUDO, SUDO_ADD, SUDO_LIST, PING, VERSION, SUBSCRIBE, HELP\n".to_string(),
+                    "HELP" => "OK: Available commands: AUTHORIZE, LIST_PATTERNS, REVOKE_PATTERN, CLEAR_PATTERNS, ZONE_ADD, ZONE_REMOVE, ZONE_LIST, ZONE_CLEAR, PATTERN_ADD, PATTERN_REMOVE, PATTERN_LIST, PATTERN_CLEAR, STATS, STATUS, SYSTEM_INFO, ENCRYPTION_INFO, GET_LOG_CONFIG, GET_EVENTS, GET_AUDIT, INSPECT, CHECK_SUDO, SUDO_ADD, SUDO_LIST, SUDO_CLEAR, PING, VERSION, SUBSCRIBE, HELP\n".to_string(),
                     _ => "ERROR: INVALID_SYNTAX: Unknown command (type HELP for list)\n".to_string(),
                 };
 
@@ -116,7 +124,7 @@ pub async fn handle_client(stream: UnixStream, state: Arc<Mutex<AppState>>) -> R
                     batch.push(event_msg);
                     if batch.len() >= 50 { break; }
                 }
-                
+
                 if !batch.is_empty() {
                     let batched_msg = batch.join("\n") + "\n";
                     if writer.write_all(batched_msg.as_bytes()).await.is_err() { break; }

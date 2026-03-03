@@ -662,5 +662,45 @@ export function StatusBadge({ originalStatus, isNowAuthorized }: { originalStatu
             </span>
         );
     }
+    if (originalStatus === 'Cached' || originalStatus === 'Sudo Launch (Cached)') {
+        return (
+            <span className="inline-flex items-center space-x-1.5 text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-100 italic" title="Cached Sudo Session (eBPF Detected)">
+                <div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div>
+                <span className="text-[10px] font-bold">Sudo Cached</span>
+            </span>
+        );
+    }
+    if (originalStatus === 'Sudo Launch (Authored)') {
+        return (
+            <span className="inline-flex items-center space-x-1.5 text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100" title="Password-Authorized Sudo Session">
+                <CheckCircle size={10} strokeWidth={3} />
+                <span className="text-[10px] font-bold">Sudo Authored</span>
+            </span>
+        );
+    }
+    if (originalStatus === 'Elevation') {
+        return (
+            <span className="inline-flex items-center space-x-1.5 text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100" title="Authorized via Quick Sudo Rule">
+                <ShieldCheck size={10} strokeWidth={3} />
+                <span className="text-[10px] font-bold">Quick Sudo</span>
+            </span>
+        );
+    }
+    if (originalStatus === 'Standard Elevation') {
+        return (
+            <span className="inline-flex items-center space-x-1.5 text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-100" title="Standard Sudo (Password Required)">
+                <Clock size={10} strokeWidth={3} />
+                <span className="text-[10px] font-bold">Standard Sudo</span>
+            </span>
+        );
+    }
+    if (originalStatus === 'Blocked Elevation') {
+        return (
+            <span className="inline-flex items-center space-x-1.5 text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-100" title="Sudo Elevation Blocked (No matching rule or incomplete chain)">
+                <X size={10} strokeWidth={3} />
+                <span className="text-[10px] font-bold">Elevation Blocked</span>
+            </span>
+        );
+    }
     return null;
 }

@@ -1,16 +1,13 @@
-use anyhow::Result;
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use serde_json::json;
 use crate::state::AppState;
+use anyhow::Result;
+use serde_json::json;
+use std::sync::Arc;
 
-pub async fn handle_inspect(state: &Arc<Mutex<AppState>>, signature: u64) -> Result<Option<String>> {
-    let lineage_cache = {
-        let state_lock = state.lock().await;
-        state_lock.lineage_cache.clone()
-    };
-    
-    let find_result = lineage_cache.iter()
+pub async fn handle_inspect(state: &Arc<AppState>, signature: u64) -> Result<Option<String>> {
+    let lineage_cache = state.lineage_cache.clone();
+
+    let find_result = lineage_cache
+        .iter()
         .find(|r| r.value().signature == signature)
         .map(|r| {
             let node = r.value();
@@ -25,6 +22,6 @@ pub async fn handle_inspect(state: &Arc<Mutex<AppState>>, signature: u64) -> Res
             });
             format!("OK: {}\n", info)
         });
-        
+
     Ok(find_result)
 }

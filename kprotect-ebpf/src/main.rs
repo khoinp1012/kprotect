@@ -52,6 +52,7 @@ const EVENT_TYPE_VERIFIED: u32 = 1;
 const EVENT_TYPE_BLOCK: u32 = 2;
 const EVENT_TYPE_BIRTH: u32 = 3;
 const EVENT_TYPE_EXIT: u32 = 4;
+// const EVENT_TYPE_SUDO: u32 = 5; // Removed: Logic moved to daemon
 
 // Provable bounds
 const LPM_KEY_SIZE: usize = 32;
@@ -167,7 +168,7 @@ fn compute_next_signature(parent_sig: u64, path: &[u8]) -> u64 {
 #[inline(always)]
 fn compute_path_hash(path: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf29ce484222325;
-    
+
     // Use path.len() and bound it for the verifier
     let actual_len = if path.len() < 256 { path.len() } else { 256 };
 
@@ -177,7 +178,7 @@ fn compute_path_hash(path: &[u8]) -> u64 {
     } else {
         0
     };
-    
+
     #[allow(clippy::needless_range_loop)]
     for i in 0..MAX_PATH_HASH {
         let idx = (start_offset + i) & 0xFF;
@@ -201,7 +202,7 @@ fn read_and_hash_arg(bprm: *const linux_binprm, arg_out: *mut u8) -> u64 {
         if p == 0 { return 0; }
 
         let res = bpf_probe_read_user(
-             arg_out as *mut c_void, 
+             arg_out as *mut c_void,
              64,
              p as *const c_void
         );
@@ -210,7 +211,7 @@ fn read_and_hash_arg(bprm: *const linux_binprm, arg_out: *mut u8) -> u64 {
         // Simply hash the whole 64-byte block for a robust signature
         const FNV_PRIME: u64 = 0x100000001b3;
         let mut h: u64 = 0xcbf29ce484222325;
-        
+
         for i in 0..64 {
             let b = *arg_out.add(i & 0x3F);
             h ^= b as u64;
@@ -232,9 +233,9 @@ fn is_red_zone(path: &[u8], path_len: usize) -> bool {
     // 1. Prefix match - using map buffer
     unsafe {
         core::ptr::write_bytes((*scratch).prefix_key.as_mut_ptr(), 0, LPM_KEY_SIZE);
-        
+
         let copy_len = if path_len < LPM_KEY_SIZE { path_len } else { LPM_KEY_SIZE };
-        
+
         #[allow(clippy::needless_range_loop)]
         for i in 0..LPM_KEY_SIZE {
             let idx = i & 0x1F;
@@ -243,44 +244,44 @@ fn is_red_zone(path: &[u8], path_len: usize) -> bool {
             if b == 0 { break; }
             (*scratch).prefix_key[idx] = b;
         }
-        
+
         let key = Key::new((copy_len * 8) as u32, PathKey { data: (*scratch).prefix_key });
         if RED_PREFIX_MAP.get(&key).is_some() {
             return true;
         }
     }
-    
+
     // 2. Suffix match - using map buffer
     unsafe {
         core::ptr::write_bytes((*scratch).suffix_key.as_mut_ptr(), 0, LPM_KEY_SIZE);
-        
+
         // Use path_len to find the actual end of the string (excluding NUL)
         // bpf_d_path returns length INCLUDING null terminator
         let str_len = if path_len > 0 { path_len - 1 } else { 0 };
         let valid_len = if str_len < 256 { str_len } else { 255 };
-        
+
         // Take up to LPM_KEY_SIZE characters from the END
         let rev_len = if valid_len < LPM_KEY_SIZE { valid_len } else { LPM_KEY_SIZE };
-        
+
         #[allow(clippy::needless_range_loop)]
         for i in 0..LPM_KEY_SIZE {
             let idx = i & 0x1F; // mask to 31
             if idx >= rev_len { break; }
-            
+
             let src_idx = valid_len - 1 - idx;
             let safe_src_idx = src_idx & 0xFF;
-            
+
             if safe_src_idx < path.len() {
                 (*scratch).suffix_key[idx] = path[safe_src_idx];
             }
         }
-        
+
         let rev_key = Key::new((rev_len * 8) as u32, PathKey { data: (*scratch).suffix_key });
         if RED_SUFFIX_MAP.get(&rev_key).is_some() {
             return true;
         }
     }
-    
+
     // 3. Exact match
     let hash = compute_path_hash(path);
     unsafe { RED_EXACT_MAP.get(&hash).is_some() }
@@ -293,12 +294,12 @@ fn needs_enrichment(path: &[u8], path_len: usize) -> bool {
         Some(s) => s,
         None => return false,
     };
-    
+
     let copy_len = if path_len < LPM_KEY_SIZE { path_len } else { LPM_KEY_SIZE };
 
     unsafe {
         core::ptr::write_bytes((*scratch).prefix_key.as_mut_ptr(), 0, LPM_KEY_SIZE);
-        
+
         #[allow(clippy::needless_range_loop)]
         for i in 0..LPM_KEY_SIZE {
             let idx = i & 0x1F;
@@ -307,7 +308,7 @@ fn needs_enrichment(path: &[u8], path_len: usize) -> bool {
             if b == 0 { break; }
             (*scratch).prefix_key[idx] = b;
         }
-        
+
         let key = Key::new((copy_len * 8) as u32, PathKey { data: (*scratch).prefix_key });
         ENRICHMENT_PREFIX_MAP.get(&key).is_some()
     }
@@ -325,7 +326,7 @@ pub fn bprm_committed_creds(ctx: LsmContext) -> i32 {
 
     let task = unsafe { bpf_get_current_task() } as *mut task_struct;
     let parent = unsafe { bpf_probe_read_kernel(core::ptr::addr_of!((*task).real_parent)).unwrap_or(core::ptr::null_mut()) };
-    
+
     let mut parent_sig: u64 = 0;
     let mut ppid: u32 = 0;
     if !parent.is_null() {
@@ -344,10 +345,10 @@ pub fn bprm_committed_creds(ctx: LsmContext) -> i32 {
     if !filename_ptr.is_null() {
         let mut path_buf = [0u8; 64];
         let path_res = unsafe { bpf_probe_read_kernel_str_bytes(filename_ptr as *const u8, &mut path_buf) };
-        
+
         if let Ok(path_bytes) = path_res {
             let mut child_sig = compute_next_signature(parent_sig, path_bytes);
-            
+
             // CHECK ENRICHMENT
             // Calculate enrichment hash locally first (optimization to avoid map lookup if not needed)
             if needs_enrichment(path_bytes, path_bytes.len()) {
@@ -362,7 +363,7 @@ pub fn bprm_committed_creds(ctx: LsmContext) -> i32 {
             }
 
             let _ = unsafe { PROCESS_SIGNATURES.insert(&pid, &child_sig, 0) };
-            
+
             if let Some(event) = unsafe { EVENT_SCRATCH.get_ptr_mut(0) } {
                 unsafe {
                     (*event).pid = pid;
@@ -372,10 +373,10 @@ pub fn bprm_committed_creds(ctx: LsmContext) -> i32 {
                     (*event).event_type = EVENT_TYPE_BIRTH;
                     (*event).argc = argc;
                     bpf_get_current_comm((*event).comm.as_mut_ptr() as *mut c_void, 16);
-                    
+
                     // CRITICAL: Zero path buffer first to prevent corruption!
                     core::ptr::write_bytes((*event).path.as_mut_ptr(), 0, 256);
-                    
+
                     // Copy path from stack buffer to event map
                     // Limit to 64 bytes (MAX_PATH_HASH) since that's what we read
                     let copy_len = if path_bytes.len() < 64 { path_bytes.len() } else { 64 };
@@ -384,7 +385,7 @@ pub fn bprm_committed_creds(ctx: LsmContext) -> i32 {
                         if i >= copy_len { break; }
                          (*event).path[i] = path_buf[i];
                     }
-                    
+
                     // Clear arg buffer before emission (it was used for hashing above)
                     core::ptr::write_bytes((*event).arg.as_mut_ptr(), 0, 64);
                     let _ = EVENTS.output(&ctx, &*event, 0);
@@ -454,7 +455,7 @@ pub fn file_open(ctx: LsmContext) -> i32 {
         core::ptr::write_bytes((*event).arg.as_mut_ptr(), 0, 64);
         let _ = EVENTS.output(&ctx, &*event, 0);
     }
-    
+
     -1
 }
 
@@ -471,7 +472,7 @@ pub fn task_free(ctx: LsmContext) -> i32 {
     if pid != tgid {
         return 0;
     }
-    
+
     let start_time = unsafe { bpf_probe_read_kernel(core::ptr::addr_of!((*task).start_time)).unwrap_or(0) };
 
     // Emit EXIT event to userspace BEFORE removing from map
@@ -485,7 +486,7 @@ pub fn task_free(ctx: LsmContext) -> i32 {
             let _ = EVENTS.output(&ctx, &*event, 0);
         }
     }
-    
+
     // Now remove from kernel map
     let _ = PROCESS_SIGNATURES.remove(&tgid);
 

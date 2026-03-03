@@ -35,9 +35,9 @@ interface GlobalState {
 export const GlobalContext = createContext<GlobalState | undefined>(undefined);
 
 // Utility Helpers (Pure functions outside to avoid stale closures/hoisting issues)
-const mapRawEventToUI = (raw: any): Event => {
+export const mapRawEventToUI = (raw: any): Event => {
     const statusStr = (raw.status || "").trim();
-    let status: 'Verified' | 'Blocked' | 'Birth' | 'Exit' | 'Elevation' | 'Blocked Elevation' | 'Unknown' = 'Unknown';
+    let status: 'Verified' | 'Blocked' | 'Birth' | 'Exit' | 'Elevation' | 'Blocked Elevation' | 'Standard Elevation' | 'Sudo Launch (Authored)' | 'Sudo Launch (Cached)' | 'Unknown' = 'Unknown';
 
     if (statusStr === 'Verified') status = 'Verified';
     else if (statusStr === 'Blocked') status = 'Blocked';
@@ -45,6 +45,9 @@ const mapRawEventToUI = (raw: any): Event => {
     else if (statusStr === 'Exit') status = 'Exit';
     else if (statusStr === 'Elevation') status = 'Elevation';
     else if (statusStr === 'Blocked Elevation') status = 'Blocked Elevation';
+    else if (statusStr === 'Sudo Launch (Authored)') status = 'Sudo Launch (Authored)';
+    else if (statusStr === 'Sudo Launch (Cached)') status = 'Sudo Launch (Cached)';
+    else if (statusStr === 'Standard Elevation') status = 'Standard Elevation';
     else {
         console.error(`Unknown event status received: "${statusStr}"`, raw);
     }
@@ -59,11 +62,12 @@ const mapRawEventToUI = (raw: any): Event => {
         chain: Array.isArray(raw.chain) ? raw.chain : (raw.comm ? [raw.comm] : []),
         path: raw.target || raw.path || (Array.isArray(raw.chain) && raw.chain.length > 0 ? raw.chain[raw.chain.length - 1] : (raw.comm || 'unknown')),
         complete: !!raw.complete,
-        signature: raw.signature
+        signature: raw.signature,
+        comm: raw.comm || (Array.isArray(raw.chain) && raw.chain.length > 0 ? raw.chain[raw.chain.length - 1] : 'unknown')
     };
 };
 
-const compressEvents = (rawList: Event[]): Event[] => {
+export const compressEvents = (rawList: Event[]): Event[] => {
     if (rawList.length === 0) return [];
 
     // Grouping by "Identity": Status + Path + Chain
@@ -188,19 +192,10 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
 
     // Recompress state when toggle changes
     useEffect(() => {
-        console.log('[CompressionEffect] compressionEnabled changed to:', compressionEnabled);
-        console.log('[CompressionEffect] events.length:', events.length);
-
-        if (compressionEnabled && events.length > 1) {
-            console.log('[CompressionEffect] Triggering recompression...');
-            setEvents(prev => {
-                const recompressed = recompressGroups(compressEvents(prev));
-                console.log('[CompressionEffect] Recompressed:', prev.length, '->', recompressed.length);
-                return recompressed;
-            });
-        } else if (!compressionEnabled && events.length > 0) {
-            // When turning compression OFF, reload raw events from backend
-            console.log('[CompressionEffect] Compression disabled, reloading raw events...');
+        if (compressionEnabled) {
+            setEvents(prev => recompressGroups(compressEvents(prev)));
+            setElevationEvents(prev => recompressGroups(compressEvents(prev)));
+        } else {
             const reloadRawEvents = async () => {
                 try {
                     const CHUNK_SIZE = 200;
@@ -208,20 +203,19 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
 
                     if (Array.isArray(rawEvents)) {
                         rawEventCount.current = rawEvents.length;
-                        const mapped = rawEvents
-                            .map(mapRawEventToUI)
-                            .filter(e => e.status !== 'Birth' && e.status !== 'Elevation' && e.status !== 'Blocked Elevation');
+                        const allMapped = rawEvents.map(mapRawEventToUI);
 
-                        console.log('[CompressionEffect] Loaded raw events:', mapped.length);
-                        setEvents(mapped);
+                        const sudoMapped = allMapped.filter(e => e.status === 'Elevation' || e.status === 'Blocked Elevation' || e.status === 'Standard Elevation' || e.status.startsWith('Sudo Launch'));
+                        const fileMapped = allMapped.filter(e => e.status !== 'Birth' && e.status !== 'Elevation' && e.status !== 'Blocked Elevation' && e.status !== 'Standard Elevation' && !e.status.startsWith('Sudo Launch'));
+
+                        setEvents(fileMapped);
+                        setElevationEvents(sudoMapped);
                     }
                 } catch (e) {
                     console.error('[CompressionEffect] Failed to reload raw events:', e);
                 }
             };
             reloadRawEvents();
-        } else {
-            console.log('[CompressionEffect] Skipping (enabled:', compressionEnabled, ', length:', events.length, ')');
         }
     }, [compressionEnabled]);
 
@@ -316,7 +310,7 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
 
                 if (newEvent.status === 'Birth') return;
 
-                if (newEvent.status === 'Elevation' || newEvent.status === 'Blocked Elevation') {
+                if (newEvent.status === 'Elevation' || newEvent.status === 'Blocked Elevation' || newEvent.status === 'Standard Elevation' || newEvent.status.startsWith('Sudo Launch')) {
                     elevationBuffer.current.push(newEvent);
                 } else {
                     eventBuffer.current.push(newEvent);
@@ -338,15 +332,15 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
                 rawEventCount.current = rawEvents.length;
                 const allMapped = rawEvents.map(mapRawEventToUI);
 
-                const fileMapped = allMapped.filter(e => e.status !== 'Birth' && e.status !== 'Elevation' && e.status !== 'Blocked Elevation');
-                const sudoMapped = allMapped.filter(e => e.status === 'Elevation' || e.status === 'Blocked Elevation');
-
-                setElevationEvents(sudoMapped.slice(0, 500));
+                const fileMapped = allMapped.filter(e => e.status !== 'Birth' && e.status !== 'Elevation' && e.status !== 'Blocked Elevation' && e.status !== 'Standard Elevation' && !e.status.startsWith('Sudo Launch'));
+                const sudoMapped = allMapped.filter(e => e.status === 'Elevation' || e.status === 'Blocked Elevation' || e.status === 'Standard Elevation' || e.status.startsWith('Sudo Launch'));
 
                 if (!compressionEnabledRef.current) {
                     setEvents(fileMapped);
+                    setElevationEvents(sudoMapped.slice(0, 500));
                 } else {
                     setEvents(recompressGroups(compressEvents(fileMapped)));
+                    setElevationEvents(recompressGroups(compressEvents(sudoMapped)).slice(0, 500));
                 }
             }
 
@@ -368,7 +362,7 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
             if (Array.isArray(rawEvents)) {
                 const mapped = rawEvents
                     .map(mapRawEventToUI)
-                    .filter(e => e.status !== 'Birth' && e.status !== 'Elevation' && e.status !== 'Blocked Elevation');
+                    .filter(e => e.status !== 'Birth' && e.status !== 'Elevation' && e.status !== 'Blocked Elevation' && e.status !== 'Standard Elevation' && !e.status.startsWith('Sudo Launch'));
                 rawEventCount.current += rawEvents.length;
 
                 setEvents(prev => {
@@ -448,7 +442,7 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
                 eventBuffer.current = [];
 
                 setEvents(prev => {
-                    const mapped = batch.filter(e => e.status !== 'Birth' && e.status !== 'Elevation' && e.status !== 'Blocked Elevation');
+                    const mapped = batch.filter(e => e.status !== 'Birth' && e.status !== 'Elevation' && e.status !== 'Blocked Elevation' && e.status !== 'Standard Elevation' && !e.status.startsWith('Sudo Launch'));
                     if (!compressionEnabledRef.current) return [...mapped, ...prev].slice(0, 1000);
 
                     const compressedBatch = compressEvents(mapped);
@@ -459,7 +453,11 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
             if (elevationBuffer.current.length > 0) {
                 const batch = [...elevationBuffer.current];
                 elevationBuffer.current = [];
-                setElevationEvents(prev => [...batch, ...prev].slice(0, 500));
+                setElevationEvents(prev => {
+                    if (!compressionEnabledRef.current) return [...batch, ...prev].slice(0, 500);
+                    const compressedBatch = compressEvents(batch);
+                    return recompressGroups([...compressedBatch, ...prev]).slice(0, 500);
+                });
             }
         }, 500);
 

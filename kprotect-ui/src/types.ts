@@ -2,7 +2,7 @@ export interface Event {
     id: number | string;
     timestamp: string;
     last_seen?: number | string; // For grouping validation
-    status: 'Verified' | 'Blocked' | 'Birth' | 'Exit' | 'Elevation' | 'Blocked Elevation' | 'Unknown';
+    status: 'Verified' | 'Blocked' | 'Birth' | 'Exit' | 'Elevation' | 'Blocked Elevation' | 'Standard Elevation' | 'Sudo Launch (Authored)' | 'Sudo Launch (Cached)' | 'Unknown';
     pid: number;
     // signature is deprecated but might be present in old logs or transition
     // hash is also deprecated
@@ -11,6 +11,7 @@ export interface Event {
     complete?: boolean; // Is the lineage complete / started from root?
     signature?: number;
     count?: number; // Grouping counter
+    comm?: string; // Initiating process name
 }
 
 export interface Stats {

@@ -24,6 +24,9 @@ fi
 info "Cleaning previous builds..."
 cargo clean
 
+info "Building eBPF programs..."
+cargo xtask build-ebpf --release
+
 info "Building release binaries..."
 cargo build --release
 

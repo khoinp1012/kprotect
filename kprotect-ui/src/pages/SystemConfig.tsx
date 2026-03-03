@@ -1,14 +1,14 @@
 import { useState } from 'react';
-import { Bell, Settings2, Shield, Lock } from 'lucide-react';
+import { Bell, Settings2 } from 'lucide-react';
 import { Settings } from './Settings';
 import { Notifications } from './Notifications';
 
 interface SystemConfigProps {
-    initialTab?: 'notifications' | 'daemon' | 'encryption';
+    initialTab?: 'notifications' | 'daemon';
 }
 
 export function SystemConfig({ initialTab = 'notifications' }: SystemConfigProps = {}) {
-    const [activeTab, setActiveTab] = useState<'notifications' | 'daemon' | 'encryption'>(initialTab);
+    const [activeTab, setActiveTab] = useState<'notifications' | 'daemon'>(initialTab);
 
     const renderTabContent = () => {
         switch (activeTab) {
@@ -16,17 +16,6 @@ export function SystemConfig({ initialTab = 'notifications' }: SystemConfigProps
                 return <Notifications />;
             case 'daemon':
                 return <Settings />;
-            case 'encryption':
-                return (
-                    <div className="p-12 text-center bg-white border border-zinc-200 rounded-xl shadow-sm">
-                        <Lock className="mx-auto text-zinc-200 mb-4" size={32} />
-                        <h3 className="text-zinc-900 font-bold">Key Management</h3>
-                        <p className="text-zinc-500 text-sm mt-2">Policy encryption keys are managed at the daemon level.</p>
-                        <button className="mt-6 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100">
-                            Rotate Security Key
-                        </button>
-                    </div>
-                );
             default:
                 return null;
         }
@@ -35,7 +24,6 @@ export function SystemConfig({ initialTab = 'notifications' }: SystemConfigProps
     const tabs = [
         { id: 'notifications', label: 'Notification Engine', icon: <Bell size={16} /> },
         { id: 'daemon', label: 'Daemon Settings', icon: <Settings2 size={16} /> },
-        { id: 'encryption', label: 'Security & Keys', icon: <Shield size={16} /> },
     ];
 
     return (

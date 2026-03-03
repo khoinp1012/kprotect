@@ -19,7 +19,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 pub mod path_matcher;
 
@@ -58,6 +58,7 @@ pub const EVENT_TYPE_VERIFIED: u32 = 1;
 pub const EVENT_TYPE_BLOCK: u32 = 2;
 pub const EVENT_TYPE_BIRTH: u32 = 3;
 pub const EVENT_TYPE_EXIT: u32 = 4;
+pub const EVENT_TYPE_SUDO: u32 = 5;
 
 /// Pattern-based authorization types
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,21 +104,21 @@ pub struct NotificationRule {
     pub id: u32,
     pub name: String,
     pub enabled: bool,
-    
+
     // FILTER (Backend-side)
     pub event_types: Vec<EventTypeFilter>,
-    pub path_pattern: Option<String>,  // Glob like "/etc/*" or "*.key"
-    
+    pub path_pattern: Option<String>, // Glob like "/etc/*" or "*.key"
+
     // ACTION
     pub action_type: ActionType,
-    pub destination: String,           // Path to .sh or URL
-    pub timeout: u32,                  // Max execution time (default: 30)
-    
+    pub destination: String, // Path to .sh or URL
+    pub timeout: u32,        // Max execution time (default: 30)
+
     // METADATA
     pub created_at: u64,
     pub last_triggered: Option<u64>,
     pub trigger_count: u64,
-    
+
     // STATISTICS
     pub success_count: u64,
     pub failure_count: u64,
@@ -217,4 +218,39 @@ pub enum LogEntry {
         details: serde_json::Value,
         success: bool,
     },
+}
+// ============================================================================
+// Configuration & Backup Types
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ZonesConfig {
+    pub red_zones: Vec<String>,
+    #[serde(default)]
+    pub green_zones: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnrichmentConfig {
+    pub enrichment_patterns: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogConfig {
+    pub event_log_retention_days: u32,
+    pub audit_log_retention_days: u32,
+    pub event_log_enabled: bool,
+    pub audit_log_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KProtectBackup {
+    pub version: String,
+    pub timestamp: u64,
+    pub zones: ZonesConfig,
+    pub enrichment: EnrichmentConfig,
+    pub authorized_patterns: Vec<AuthorizedPattern>,
+    pub sudo_rules: Vec<SudoRule>,
+    pub notification_rules: Vec<NotificationRule>,
+    pub log_config: LogConfig,
 }

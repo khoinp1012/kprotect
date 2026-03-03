@@ -14,6 +14,14 @@ case "$1" in
         fi
         # Clean up PID file
         rm -f /run/kprotect/kprotect.pid || true
+
+        # Remove PAM registration
+        if [ -f "/etc/pam.d/sudo" ]; then
+            if grep -q "pam_kprotect.so" /etc/pam.d/sudo; then
+                echo "Removing kprotect from /etc/pam.d/sudo..."
+                sed -i '/pam_kprotect.so/d' /etc/pam.d/sudo
+            fi
+        fi
         ;;
     upgrade|failed-upgrade)
         # Don't stop service during upgrade
