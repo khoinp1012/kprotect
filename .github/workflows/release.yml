@@ -57,23 +57,13 @@ jobs:
       - name: Install cargo-deb
         run: cargo install cargo-deb
 
-      - name: Build eBPF Programs
-        run: cargo xtask build-ebpf --release
+      - name: Build Core Components and Debian Package
+        run: bash scripts/build_deb.sh
 
-      - name: Build Core Binaries and Package
-        run: |
-          cargo build --release
-          cd kprotect-daemon
-          cargo deb --no-build --output ../target/kprotect-core.deb
-          cd ..
+      - name: Build GUI Components
+        run: bash scripts/build_gui.sh
 
-      - name: Install Frontend Dependencies
-        run: |
-          cd kprotect-ui
-          npm install
-          cd ..
-
-      - name: Build and Release Tauri GUI
+      - name: Release Tauri GUI
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -84,7 +74,7 @@ jobs:
           releaseBody: "Automated release for kprotect."
           releaseDraft: true
           prerelease: false
-          args: --target x86_64-unknown-linux-gnu
+          args: --target x86_64-unknown-linux-gnu --bundles deb,appimage
 
       - name: Upload Core Debian Package to Release
         uses: softprops/action-gh-release@v2

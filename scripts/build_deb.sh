@@ -33,13 +33,13 @@ cargo build --release
 # 2. Build Debian Package
 info "Packaging .deb..."
 cd kprotect-daemon
-cargo deb --no-build --output ../target/kprotect.deb
+cargo deb --no-build --output ../target/kprotect-core.deb
 cd ..
 
 # 3. Result
-if [ -f "target/kprotect.deb" ]; then
-    success "Package created at target/kprotect.deb"
-    dpkg-deb --info target/kprotect.deb
+if [ -f "target/kprotect-core.deb" ]; then
+    success "Package created at target/kprotect-core.deb"
+    dpkg-deb --info target/kprotect-core.deb
 else
     echo -e "${RED}[ERROR]${NC} Failed to create .deb file"
     exit 1
