@@ -57,7 +57,7 @@ pub async fn handle_authorize(state: &Arc<AppState>, cmd: &str, caller_uid: u32)
 
     let auth_pattern = AuthorizedPattern {
         pattern: pattern.clone(),
-        match_mode: match_mode.clone(),
+        match_mode,
         description: description.clone(),
         authorized_at: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -90,7 +90,7 @@ pub async fn handle_authorize(state: &Arc<AppState>, cmd: &str, caller_uid: u32)
     );
 
     // Persistence
-    let encryption_key = state.encryption_key.clone();
+    let encryption_key = state.encryption_key;
     save_authorized_patterns(&rules.authorized_patterns, &encryption_key)
         .context("Failed to save authorized patterns")?;
 
@@ -153,7 +153,7 @@ pub async fn handle_revoke(state: &Arc<AppState>, cmd: &str, caller_uid: u32) ->
             true,
         );
 
-        let encryption_key = state.encryption_key.clone();
+        let encryption_key = state.encryption_key;
         save_authorized_patterns(&rules.authorized_patterns, &encryption_key)?;
 
         info!(
@@ -193,7 +193,7 @@ pub async fn handle_clear(state: &Arc<AppState>, caller_uid: u32) -> Result<Stri
         true,
     );
 
-    let encryption_key = state.encryption_key.clone();
+    let encryption_key = state.encryption_key;
     save_authorized_patterns(&rules.authorized_patterns, &encryption_key)?;
 
     info!("🗑️ Cleared all authorized patterns");

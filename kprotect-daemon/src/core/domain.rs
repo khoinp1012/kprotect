@@ -47,7 +47,7 @@ impl ChainTrieNode {
             current = current
                 .children
                 .entry(part.clone())
-                .or_insert_with(ChainTrieNode::new);
+                .or_default();
         }
         current.is_terminal = true;
         current.pattern = Some(pattern);

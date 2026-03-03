@@ -27,9 +27,8 @@ pub fn parse_pattern(pattern: &str) -> Result<PatternType> {
     }
 
     // Single asterisk
-    if pattern.starts_with('*') {
+    if let Some(suffix) = pattern.strip_prefix('*') {
         // Suffix match: "*.env" -> ".env"
-        let suffix = &pattern[1..];
         if suffix.contains('*') {
             bail!(
                 "Invalid pattern '{}': asterisk must be at start or end only",
@@ -39,9 +38,8 @@ pub fn parse_pattern(pattern: &str) -> Result<PatternType> {
         return Ok(PatternType::Suffix(suffix.to_string()));
     }
 
-    if pattern.ends_with('*') {
+    if let Some(prefix) = pattern.strip_suffix('*') {
         // Prefix match: "/usr/*" -> "/usr/"
-        let prefix = &pattern[..pattern.len() - 1];
         if prefix.contains('*') {
             bail!(
                 "Invalid pattern '{}': asterisk must be at start or end only",
@@ -59,26 +57,22 @@ pub fn parse_pattern(pattern: &str) -> Result<PatternType> {
 
 /// Truncate a pattern for matching limits (LPM_KEY_SIZE)
 pub fn truncate_zone_pattern(pattern: &str) -> String {
-    if pattern.starts_with('*') {
-        let suffix = &pattern[1..];
+    if let Some(suffix) = pattern.strip_prefix('*') {
         if suffix.len() > LPM_KEY_SIZE {
             format!("*{}", &suffix[..LPM_KEY_SIZE])
         } else {
             pattern.to_string()
         }
-    } else if pattern.ends_with('*') {
-        let prefix = &pattern[..pattern.len() - 1];
+    } else if let Some(prefix) = pattern.strip_suffix('*') {
         if prefix.len() > LPM_KEY_SIZE {
             format!("{}*", &prefix[..LPM_KEY_SIZE])
         } else {
             pattern.to_string()
         }
+    } else if pattern.len() > LPM_KEY_SIZE {
+        pattern[..LPM_KEY_SIZE].to_string()
     } else {
-        if pattern.len() > LPM_KEY_SIZE {
-            pattern[..LPM_KEY_SIZE].to_string()
-        } else {
-            pattern.to_string()
-        }
+        pattern.to_string()
     }
 }
 

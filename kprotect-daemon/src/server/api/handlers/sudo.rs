@@ -34,7 +34,7 @@ async fn check_sudo_internal(state: &Arc<AppState>, cmd: &str) -> Result<String>
         let maybe_path = lineage_cache.get(&target_pid).map(|n| n.path.clone());
         if let Some(path) = maybe_path {
             let (chain, complete) =
-                build_lineage_chain(target_pid, &"".to_string(), &path, &lineage_cache);
+                build_lineage_chain(target_pid, "", &path, &lineage_cache);
             (chain, complete, true)
         } else {
             (vec![format!("PID:{}", target_pid)], false, false)
@@ -45,7 +45,7 @@ async fn check_sudo_internal(state: &Arc<AppState>, cmd: &str) -> Result<String>
         chain.push(cmd);
     }
 
-    let (engine_enabled, sudo_bypass_enabled, sudo_rules) = {
+    let (_engine_enabled, _sudo_bypass_enabled, sudo_rules) = {
         let rules = state.rules.read().unwrap();
         (
             rules.config.engine_enabled,
@@ -60,8 +60,6 @@ async fn check_sudo_internal(state: &Arc<AppState>, cmd: &str) -> Result<String>
         &chain,
         path_found,
         is_complete,
-        engine_enabled,
-        sudo_bypass_enabled,
         &sudo_rules,
     )
     .await
@@ -81,10 +79,12 @@ async fn evaluate_sudo_access(
     chain: &[String],
     path_found: bool,
     is_complete: bool,
-    engine_enabled: bool,
-    sudo_bypass_enabled: bool,
     sudo_rules: &[SudoRule],
 ) -> Result<String> {
+    let (engine_enabled, sudo_bypass_enabled) = {
+        let rules = state.rules.read().unwrap();
+        (rules.config.engine_enabled, rules.config.sudo_bypass_enabled)
+    };
     let verdict = evaluate_sudo_access_logic(
         target_pid,
         chain,
@@ -116,7 +116,7 @@ async fn evaluate_sudo_access(
             broadcast_elevation_event(
                 state,
                 target_pid,
-                &chain,
+                chain,
                 "Elevation",
                 true,
                 &rule_desc,
@@ -152,7 +152,7 @@ async fn evaluate_sudo_access(
             broadcast_elevation_event(
                 state,
                 target_pid,
-                &chain,
+                chain,
                 "Standard Elevation",
                 false,
                 &log_reason,
@@ -195,7 +195,7 @@ async fn evaluate_sudo_access(
             broadcast_elevation_event(
                 state,
                 target_pid,
-                &chain,
+                chain,
                 "Blocked Elevation",
                 false,
                 &log_reason,
@@ -279,110 +279,6 @@ fn matches_sudo_rule(pattern: &[String], chain: &[String]) -> bool {
     }
 
     true
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_sudo_verdict_engine_disabled() {
-        let rules = vec![];
-        let verdict = evaluate_sudo_access_logic(
-            1234,
-            &["/bin/bash".into()],
-            true,
-            true,
-            false,
-            true,
-            &rules,
-        )
-        .await;
-        match verdict {
-            SudoVerdict::Ignored(_, reason) => assert_eq!(reason, "Engine disabled"),
-            _ => panic!("Should be ignored"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_sudo_verdict_incomplete_lineage() {
-        let rules = vec![];
-        // Path found but chain incomplete (e.g. parent missing)
-        let verdict = evaluate_sudo_access_logic(
-            1234,
-            &["PID:100".into(), "/bin/bash".into()],
-            true,
-            false,
-            true,
-            true,
-            &rules,
-        )
-        .await;
-        match verdict {
-            SudoVerdict::Ignored(_, reason) => assert_eq!(reason, "Incomplete lineage chain"),
-            _ => panic!("Should be ignored"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_sudo_verdict_pid_not_found() {
-        let rules = vec![];
-        let verdict = evaluate_sudo_access_logic(
-            1234,
-            &["PID:1234".into()],
-            false,
-            false,
-            true,
-            true,
-            &rules,
-        )
-        .await;
-        match verdict {
-            SudoVerdict::Ignored(_, reason) => assert_eq!(reason, "PID not in lineage cache"),
-            _ => panic!("Should be ignored"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_sudo_verdict_authorized() {
-        let rules = vec![SudoRule {
-            pattern: vec!["/bin/bash".into(), "apt update".into()],
-            description: "Allow apt".into(),
-            created_at: 0,
-            enabled: true,
-        }];
-        let verdict = evaluate_sudo_access_logic(
-            1234,
-            &["/bin/bash".into(), "apt update".into()],
-            true,
-            true,
-            true,
-            true,
-            &rules,
-        )
-        .await;
-        match verdict {
-            SudoVerdict::Authorized(desc) => assert_eq!(desc, "Allow apt"),
-            _ => panic!("Should be authorized"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_sudo_verdict_rule_disabled() {
-        let rules = vec![SudoRule {
-            pattern: vec!["/bin/bash".into()],
-            description: "Allow bash".into(),
-            created_at: 0,
-            enabled: false,
-        }];
-        let verdict =
-            evaluate_sudo_access_logic(1234, &["/bin/bash".into()], true, true, true, true, &rules)
-                .await;
-        match verdict {
-            SudoVerdict::Ignored(_, reason) => assert_eq!(reason, "No matching rule"),
-            _ => panic!("Should be ignored"),
-        }
-    }
 }
 
 async fn broadcast_elevation_event(
@@ -478,7 +374,7 @@ pub async fn handle_sudo_add(state: &Arc<AppState>, cmd: &str, caller_uid: u32) 
         let mut rules = state.rules.write().unwrap();
         rules.sudo_rules.push(rule);
 
-        let encryption_key = state.encryption_key.clone();
+        let encryption_key = state.encryption_key;
         save_sudo_rules(&rules.sudo_rules, &encryption_key)?;
     }
 
@@ -510,7 +406,7 @@ pub async fn handle_sudo_remove(
             rules.sudo_rules.remove(pos);
             found = true;
 
-            let encryption_key = state.encryption_key.clone();
+            let encryption_key = state.encryption_key;
             save_sudo_rules(&rules.sudo_rules, &encryption_key)?;
         }
     }
@@ -527,6 +423,7 @@ pub async fn handle_sudo_list(state: &Arc<AppState>) -> Result<String> {
     let json = serde_json::to_string(&rules.sudo_rules)?;
     Ok(format!("OK: {}\n", json))
 }
+
 pub async fn handle_sudo_clear(state: &Arc<AppState>, caller_uid: u32) -> Result<String> {
     if caller_uid != 0 {
         return Ok(
@@ -538,10 +435,117 @@ pub async fn handle_sudo_clear(state: &Arc<AppState>, caller_uid: u32) -> Result
         let mut rules = state.rules.write().unwrap();
         rules.sudo_rules.clear();
 
-        let encryption_key = state.encryption_key.clone();
+        let encryption_key = state.encryption_key;
         save_sudo_rules(&rules.sudo_rules, &encryption_key)?;
     }
 
     info!("🗑️ Cleared all sudo rules");
     Ok("OK: All sudo rules cleared\n".to_string())
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_sudo_verdict_engine_disabled() {
+        let rules = vec![];
+        let verdict = evaluate_sudo_access_logic(
+            1234,
+            &["/bin/bash".into()],
+            true,
+            true,
+            false,
+            true,
+            &rules,
+        )
+        .await;
+        match verdict {
+            SudoVerdict::Ignored(_, reason) => assert_eq!(reason, "Engine disabled"),
+            _ => panic!("Should be ignored"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sudo_verdict_incomplete_lineage() {
+        let rules = vec![];
+        // Path found but chain incomplete (e.g. parent missing)
+        let verdict = evaluate_sudo_access_logic(
+            1234,
+            &["PID:100".into(), "/bin/bash".into()],
+            true,
+            false,
+            true,
+            true,
+            &rules,
+        )
+        .await;
+        match verdict {
+            SudoVerdict::Ignored(_, reason) => assert_eq!(reason, "Incomplete lineage chain"),
+            _ => panic!("Should be ignored"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sudo_verdict_pid_not_found() {
+        let rules = vec![];
+        let verdict = evaluate_sudo_access_logic(
+            1234,
+            &["PID:1234".into()],
+            false,
+            false,
+            true,
+            true,
+            &rules,
+        )
+        .await;
+        match verdict {
+            SudoVerdict::Ignored(_, reason) => assert_eq!(reason, "PID not in lineage cache"),
+            _ => panic!("Should be ignored"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sudo_verdict_authorized() {
+        let rules = vec![SudoRule {
+            pattern: vec!["/bin/bash".into(), "apt update".into()],
+            description: "Allow apt".into(),
+            created_at: 0,
+            enabled: true,
+        }];
+        let verdict = evaluate_sudo_access_logic(
+            1234,
+            &["/bin/bash".into(), "apt update".into()],
+            true,
+            true,
+            true,
+            true,
+            &rules,
+        )
+        .await;
+        match verdict {
+            SudoVerdict::Authorized(desc) => assert_eq!(desc, "Allow apt"),
+            _ => panic!("Should be authorized"),
+        }
+    }
+
+    // No incomplete tests placeholder needed
+
+    #[tokio::test]
+    async fn test_sudo_verdict_rule_disabled() {
+        let rules = vec![SudoRule {
+            pattern: vec!["/bin/bash".into()],
+            description: "Allow bash".into(),
+            created_at: 0,
+            enabled: false,
+        }];
+        let verdict =
+            evaluate_sudo_access_logic(1234, &["/bin/bash".into()], true, true, true, true, &rules)
+                .await;
+        match verdict {
+            SudoVerdict::Ignored(_, reason) => assert_eq!(reason, "No matching rule"),
+            _ => panic!("Should be ignored"),
+        }
+    }
 }

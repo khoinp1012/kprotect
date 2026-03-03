@@ -109,7 +109,7 @@ pub async fn read_enrichment_patterns_file(key: &[u8; 32]) -> Result<Vec<String>
         crypto::load_encrypted(ENRICHMENT_ENC, key)
             .context("Failed to load encrypted enrichment patterns")
     })
-    .unwrap_or_else(|_| vec![]);
+    .unwrap_or_default();
 
     // Always pre-pend system patterns for visibility
     let mut all_patterns = Vec::new();

@@ -96,7 +96,7 @@ pub fn cleanup_exited_processes(cache: &DashMap<u32, LineageNode>, is_forced: bo
         .filter(|entry| {
             let node = entry.value();
             // Remove if exited with no children, or if forced cleanup
-            (node.is_exited && node.child_count == 0) || (is_forced && node.is_exited)
+            node.is_exited && (node.child_count == 0 || is_forced)
         })
         .map(|entry| *entry.key())
         .collect();

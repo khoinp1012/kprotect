@@ -64,9 +64,11 @@ mod tests {
     #[test]
     fn test_config_persistence() {
         let key = [0u8; 32];
-        let mut config = DaemonConfig::default();
-        config.engine_enabled = false;
-        config.event_log_retention_days = 99;
+        let config = DaemonConfig {
+            engine_enabled: false,
+            event_log_retention_days: 99,
+            ..DaemonConfig::default()
+        };
 
         // Clean up before test
         let _ = fs::remove_file(CONFIG_PATH);
@@ -78,7 +80,7 @@ mod tests {
         let loaded = load_config(&key).expect("Failed to load");
 
         // Verify
-        assert_eq!(loaded.engine_enabled, false);
+        assert!(!loaded.engine_enabled);
         assert_eq!(loaded.event_log_retention_days, 99);
 
         // Clean up after test
@@ -95,7 +97,7 @@ mod tests {
         let loaded = load_config(&key).expect("Failed to load default");
 
         // Verify defaults
-        assert_eq!(loaded.engine_enabled, true);
+        assert!(loaded.engine_enabled);
         assert_eq!(loaded.event_log_retention_days, 7);
     }
 }

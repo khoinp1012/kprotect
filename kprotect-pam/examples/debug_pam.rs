@@ -1,8 +1,8 @@
-use pam_sys::*;
+use pam_sys::{PamHandle, PamReturnCode};
 
 fn main() {
-    let _: pam_handle_t;
-    let _ = PAM_SUCCESS;
-    let _ = PAM_AUTH_ERR;
-    let _ = PAM_IGNORE;
+    let _pamh: *mut PamHandle = std::ptr::null_mut();
+    let _ = PamReturnCode::SUCCESS;
+    let _ = PamReturnCode::AUTH_ERR;
+    let _ = PamReturnCode::IGNORE;
 }

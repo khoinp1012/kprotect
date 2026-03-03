@@ -38,7 +38,7 @@ use colored::*;
 use kprotect_client::KprotectClient;
 use std::fs::File;
 use std::io::{Read, Write};
-use std::time::{SystemTime, UNIX_EPOCH};
+// use std::time::{SystemTime, UNIX_EPOCH}; - Unused
 // use tabled::{Table, Tabled, settings::Style};
 
 #[derive(Parser)]
@@ -378,10 +378,8 @@ async fn main() -> Result<()> {
             println!("{}\n", "═".repeat(50).bright_cyan());
 
             println!(
-                "{} Version: {}  {} Protocol: {}",
-                "📦",
+                "📦 Version: {}  🔌 Protocol: {}",
                 caps.version.cyan(),
-                "🔌",
                 caps.protocol_version.cyan()
             );
 
@@ -412,8 +410,7 @@ async fn main() -> Result<()> {
                         .authorize_pattern(&pattern_list, match_mode, description.as_deref())
                         .await?;
                     println!(
-                        "\n{} {}",
-                        "✅",
+                        "\n✅ {}",
                         "Pattern authorized successfully".green().bold()
                     );
                     println!("   {} {}", "Pattern:".dimmed(), pattern.cyan());
@@ -436,8 +433,7 @@ async fn main() -> Result<()> {
 
                     client.revoke_pattern(pattern.clone(), match_mode).await?;
                     println!(
-                        "\n{} {}",
-                        "🗑️",
+                        "\n🗑️ {}",
                         "Pattern revoked successfully".yellow().bold()
                     );
                     println!("   {} {}", "Pattern:".dimmed(), pattern.join(" → ").cyan());
@@ -463,9 +459,9 @@ async fn main() -> Result<()> {
                             println!("    {} {:?}", "Mode:".dimmed(), p.match_mode);
                             println!("    {} {}", "Description:".dimmed(), p.description.cyan());
                             println!(
-                                "    {} {}",
+                                "    {} {} (Unix timestamp)",
                                 "Authorized:".dimmed(),
-                                format!("{} (Unix timestamp)", p.authorized_at)
+                                p.authorized_at
                             );
                         }
                         println!();
@@ -532,12 +528,12 @@ async fn main() -> Result<()> {
                 if json {
                     println!("{}", serde_json::to_string_pretty(&zones)?);
                 } else {
-                    println!("\n{} {}", "🔴", "Red Zones:".red().bold());
+                    println!("\n🔴 {}", "Red Zones:".red().bold());
                     for (i, pattern) in zones.red_zones.iter().enumerate() {
                         println!("  {}. {}", (i + 1).to_string().dimmed(), pattern.yellow());
                     }
 
-                    println!("\n{} {}", "🟢", "Green Zones:".green().bold());
+                    println!("\n🟢 {}", "Green Zones:".green().bold());
                     if zones.green_zones.is_empty() {
                         println!("  {}", "(none)".dimmed());
                     } else {
@@ -572,7 +568,7 @@ async fn main() -> Result<()> {
                 if json {
                     println!("{}", serde_json::to_string_pretty(&config)?);
                 } else {
-                    println!("\n{} {}", "🔧", "Enrichment Patterns:".cyan().bold());
+                    println!("\n🔧 {}", "Enrichment Patterns:".cyan().bold());
                     for (i, pattern) in config.enrichment_patterns.iter().enumerate() {
                         println!("  {}. {}", (i + 1).to_string().dimmed(), pattern.yellow());
                     }
@@ -583,7 +579,7 @@ async fn main() -> Result<()> {
 
         Commands::GetLogConfig => {
             let config = client.get_log_config().await?;
-            println!("\n{} {}", "📝", "Log Configuration:".cyan().bold());
+            println!("\n📝 {}", "Log Configuration:".cyan().bold());
             println!(
                 "   {} {} days",
                 "Event Retention:".dimmed(),
@@ -600,9 +596,8 @@ async fn main() -> Result<()> {
         Commands::SetLogRetention { events, audit } => {
             client.set_log_retention(events, audit).await?;
             println!(
-                "\n{} {}",
-                "✅",
-                "Log retention updated successfully".green().bold()
+                "\n✅ {}",
+                "Kprotect Daemon is running and protecting your system.".green().bold()
             );
             println!(
                 "   {} {} days",
@@ -691,9 +686,7 @@ async fn main() -> Result<()> {
                     println!("{}", json_out);
                 } else {
                     println!(
-                        "\n{} {} (showing last {})",
-                        "📜",
-                        "Security Events:".red().bold(),
+                        "\n📜 Security Events: (showing last {})",
                         events.len()
                     );
                     for e in events {
@@ -707,9 +700,8 @@ async fn main() -> Result<()> {
         Commands::Audit { count } => {
             let logs = client.get_audit(count, 0).await?;
             println!(
-                "\n{} {} (showing last {})",
-                "🛡️",
-                "Audit Logs:".blue().bold(),
+                "\n🛡️ {} (showing last {})",
+                "Blocked Paths:".red().bold(),
                 logs.len()
             );
             for log in logs {
@@ -739,7 +731,7 @@ async fn main() -> Result<()> {
                 );
                 println!("{}", "═".repeat(60).bright_cyan());
 
-                println!("\n{} {}", "🚀", "Daemon Status:".bold());
+                println!("\n🚀 {}", "Daemon Status:".bold());
                 println!(
                     "   {} {}s",
                     "Uptime:".dimmed(),
@@ -761,7 +753,7 @@ async fn main() -> Result<()> {
                 );
                 println!("   {} {}", "Socket:".dimmed(), status.socket_path);
 
-                println!("\n{} {}", "🔒", "Security & Encryption:".bold());
+                println!("\n🔒 {}", "Security & Encryption:".bold());
                 println!(
                     "   {} {}",
                     "Encryption:".dimmed(),
@@ -777,7 +769,7 @@ async fn main() -> Result<()> {
                     encryption.key_fingerprint.cyan()
                 );
 
-                println!("\n{} {}", "📊", "Policy Statistics:".bold());
+                println!("\n📊 {}", "Policy Statistics:".bold());
                 println!(
                     "   {} {}",
                     "Authorized Patterns:".dimmed(),
@@ -794,7 +786,7 @@ async fn main() -> Result<()> {
                     system.enrichment_patterns.to_string().yellow()
                 );
 
-                println!("\n{} {}", "🧠", "eBPF Map Usage:".bold());
+                println!("\n🧠 {}", "eBPF Map Usage:".bold());
                 for (name, stats) in system.ebpf_maps {
                     let usage = if stats.capacity > 0 {
                         (stats.size as f32 / stats.capacity as f32) * 100.0
@@ -884,7 +876,7 @@ async fn main() -> Result<()> {
                     if json {
                         println!("{}", serde_json::to_string_pretty(&rules)?);
                     } else {
-                        println!("\n{} {}", "🔔", "Notification Rules:".cyan().bold());
+                        println!("\n🔔 {}", "Notification Rules:".cyan().bold());
 
                         if rules.is_empty() {
                             println!("  {}", "(none)".dimmed());
@@ -936,7 +928,7 @@ async fn main() -> Result<()> {
 
                                 // Stats
                                 if r.trigger_count > 0 {
-                                    println!("\n  {} {}", "📊", "Stats:".bold());
+                                    println!("\n  📊 {}", "Stats:".bold());
 
                                     let success_rate = if r.trigger_count > 0 {
                                         (r.success_count as f64 / r.trigger_count as f64) * 100.0
@@ -1018,7 +1010,7 @@ async fn main() -> Result<()> {
                         }
                     } else {
                         // Show all stats
-                        println!("\n{} {}", "📊", "Notification Statistics:".cyan().bold());
+                        println!("\n📊 {}", "Notification Statistics:".cyan().bold());
 
                         if stats.is_empty() {
                             println!("  {}\n", "(no rules)".dimmed());
@@ -1260,7 +1252,7 @@ async fn main() -> Result<()> {
                             "encryption": encryption,
                             "system": system
                         });
-                        println!("{}", output.to_string());
+                        println!("{}", output);
                     }
                     "get_log_config" => {
                         match client.get_log_config().await {

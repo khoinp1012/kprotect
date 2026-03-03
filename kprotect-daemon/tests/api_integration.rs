@@ -43,7 +43,7 @@ async fn test_api_integration_full_flow() {
     // Initially enabled (default)
     {
         let rules = state.rules.read().unwrap();
-        assert_eq!(rules.config.engine_enabled, true);
+        assert!(rules.config.engine_enabled);
     }
 
     let mut client = UnixStream::connect(&socket_path).await.unwrap();
@@ -60,7 +60,7 @@ async fn test_api_integration_full_flow() {
     // If we are root, we expect OK.
     if resp.contains("OK") {
         let rules = state.rules.read().unwrap();
-        assert_eq!(rules.config.engine_enabled, false);
+        assert!(!rules.config.engine_enabled);
     } else {
         assert!(resp.contains("PERMISSION"));
     }

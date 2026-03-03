@@ -275,55 +275,66 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_engine_success() {
-        let _lock = TEST_MUTEX.lock().unwrap();
         let (rules, key) = setup_test_rules();
-        let res = set_engine_internal(&rules, &key, "SET_ENGINE;false", 0)
-            .await
-            .unwrap();
+        let res = {
+            let _lock = TEST_MUTEX.lock().unwrap();
+            set_engine_internal(&rules, &key, "SET_ENGINE;false", 0)
+        }
+        .await
+        .unwrap();
         assert_eq!(res, "OK: Engine status updated\n");
-        assert_eq!(rules.read().unwrap().config.engine_enabled, false);
+        assert!(!rules.read().unwrap().config.engine_enabled);
     }
 
     #[tokio::test]
     async fn test_set_engine_permission_denied() {
-        let _lock = TEST_MUTEX.lock().unwrap();
         let (rules, key) = setup_test_rules();
-        let res = set_engine_internal(&rules, &key, "SET_ENGINE;false", 1000)
-            .await
-            .unwrap();
+        let res = {
+            let _lock = TEST_MUTEX.lock().unwrap();
+            set_engine_internal(&rules, &key, "SET_ENGINE;false", 1000)
+        }
+        .await
+        .unwrap();
         assert!(res.contains("ERROR: PERMISSION"));
-        assert_eq!(rules.read().unwrap().config.engine_enabled, true); // Still true
+        assert!(rules.read().unwrap().config.engine_enabled); // Still true
     }
 
     #[tokio::test]
     async fn test_set_engine_invalid_syntax() {
-        let _lock = TEST_MUTEX.lock().unwrap();
         let (rules, key) = setup_test_rules();
-        let res = set_engine_internal(&rules, &key, "SET_ENGINE", 0)
-            .await
-            .unwrap();
+        let res = {
+            let _lock = TEST_MUTEX.lock().unwrap();
+            set_engine_internal(&rules, &key, "SET_ENGINE", 0)
+        }
+        .await
+        .unwrap();
         assert!(res.contains("ERROR: INVALID_SYNTAX"));
     }
 
     #[tokio::test]
     async fn test_set_file_protection_success() {
-        let _lock = TEST_MUTEX.lock().unwrap();
         let (rules, key) = setup_test_rules();
-        let res = set_file_protection_internal(&rules, &key, "SET_FILE_PROTECTION;false", 0)
-            .await
-            .unwrap();
+        let res = {
+            let _lock = TEST_MUTEX.lock().unwrap();
+            set_file_protection_internal(&rules, &key, "SET_FILE_PROTECTION;false", 0)
+        }
+        .await
+        .unwrap();
         assert_eq!(res, "OK: File Protection status updated\n");
-        assert_eq!(rules.read().unwrap().config.file_protection_enabled, false);
+        assert!(!rules.read().unwrap().config.file_protection_enabled);
     }
 
     #[tokio::test]
     async fn test_set_sudo_bypass_success() {
-        let _lock = TEST_MUTEX.lock().unwrap();
         let (rules, key) = setup_test_rules();
-        let res = set_sudo_bypass_internal(&rules, &key, "SET_SUDO_BYPASS;false", 0)
-            .await
-            .unwrap();
+        let res = {
+            let _lock = TEST_MUTEX.lock().unwrap();
+            set_sudo_bypass_internal(&rules, &key, "SET_SUDO_BYPASS;false", 0)
+        }
+        .await
+        .unwrap();
         assert_eq!(res, "OK: Sudo Bypass status updated\n");
-        assert_eq!(rules.read().unwrap().config.sudo_bypass_enabled, false);
+        assert!(!rules.read().unwrap().config.sudo_bypass_enabled);
     }
 }
+

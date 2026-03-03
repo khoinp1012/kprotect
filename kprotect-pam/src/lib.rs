@@ -1,4 +1,4 @@
-use chrono;
+// use chrono; - Redundant import, used via chrono::... below
 use pam_sys::{PamHandle, PamReturnCode};
 use std::io::{BufRead, BufReader, Write};
 use std::os::raw::{c_char, c_int};
@@ -77,6 +77,11 @@ fn get_sudo_target_command() -> Option<String> {
     None
 }
 
+/// # Safety
+///
+/// This function is called by the PAM library. The caller must ensure that `pamh` is a valid
+/// pointer to a `PamHandle`, and that `argv` is a valid pointer to an array of `argc` valid
+/// null-terminated strings.
 #[no_mangle]
 pub unsafe extern "C" fn pam_sm_authenticate(
     pamh: *mut PamHandle,
@@ -88,6 +93,11 @@ pub unsafe extern "C" fn pam_sm_authenticate(
     perform_kprotect_check(pamh, flags, argc, argv)
 }
 
+/// # Safety
+///
+/// This function is called by the PAM library. The caller must ensure that `_pamh` is a valid
+/// pointer to a `PamHandle`, and that `_argv` is a valid pointer to an array of `_argc` valid
+/// null-terminated strings (even though they are currently unused).
 #[no_mangle]
 pub unsafe extern "C" fn pam_sm_setcred(
     _pamh: *mut PamHandle,
@@ -98,6 +108,11 @@ pub unsafe extern "C" fn pam_sm_setcred(
     PamReturnCode::SUCCESS as c_int
 }
 
+/// # Safety
+///
+/// This function is called by the PAM library. The caller must ensure that `pamh` is a valid
+/// pointer to a `PamHandle`, and that `argv` is a valid pointer to an array of `argc` valid
+/// null-terminated strings.
 #[no_mangle]
 pub unsafe extern "C" fn pam_sm_acct_mgmt(
     pamh: *mut PamHandle,

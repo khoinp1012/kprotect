@@ -63,13 +63,16 @@ jobs:
 
       - name: Install Nightly Rust
         run: |
-          rustup toolchain install nightly --profile minimal -c rust-src
+          rustup toolchain install nightly --profile minimal -c rust-src -c clippy
           rustup default stable
 
       - name: Install LLVM & Clang
         run: |
           sudo apt-get update
           sudo apt-get install -y llvm clang libelf-dev
+
+      - name: Install bpf-linker
+        run: cargo install bpf-linker
 
       - name: Cache Cargo (eBPF)
         uses: actions/cache@v4

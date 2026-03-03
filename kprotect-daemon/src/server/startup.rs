@@ -146,17 +146,17 @@ pub async fn start_daemon() -> Result<()> {
         events_blocked: AtomicU64::new(0),
         sudo_events_verified: AtomicU64::new(0),
         sudo_events_blocked: AtomicU64::new(0),
-        encryption_key: key.clone(),
+        encryption_key: key,
         start_time: std::time::Instant::now(),
         red_exact: shared_red_exact.clone(),
         red_prefix: shared_red_prefix.clone(),
         red_suffix: shared_red_suffix.clone(),
         red_enrichment_prefix: shared_enrichment_prefix.clone(),
         auth_map: shared_auth_map.clone(),
-        logger: Arc::new(logger::EncryptedLogger::new(key.clone())?), // Temp logger
+        logger: Arc::new(logger::EncryptedLogger::new(key)?), // Temp logger
         notification_manager: Arc::new(notifications::NotificationManager::new(
             Vec::new(),
-            key.clone(),
+            key,
         )),
         last_pam_elevations: Arc::new(DashMap::new()),
     };
@@ -208,7 +208,7 @@ pub async fn start_daemon() -> Result<()> {
     );
 
     // Create encrypted logger
-    let logger = Arc::new(logger::EncryptedLogger::new(key.clone())?);
+    let logger = Arc::new(logger::EncryptedLogger::new(key)?);
     info!("✅ Encrypted logger initialized");
 
     // Initialize configs with defaults if they don't exist (with audit logging)
@@ -474,7 +474,7 @@ pub async fn start_daemon() -> Result<()> {
                 );
             }
 
-            if hour % 6 == 0 && removed == 0 {
+            if hour.is_multiple_of(6) && removed == 0 {
                 // Run forced cleanup if normal cleanup didn't find anything
                 let forced_removed = crate::core::process::cleanup_exited_processes(
                     &state_clone.lineage_cache,
@@ -577,8 +577,10 @@ async fn load_zones(
 
 use crate::server::api::utils::SYSTEM_ENRICHMENT_PATTERNS;
 
+type PathTrieMap = LpmTrie<MapData, PathKey, u8>;
+
 async fn load_enrichment_patterns(
-    map_mutex: &Arc<Mutex<Option<LpmTrie<MapData, PathKey, u8>>>>,
+    map_mutex: &Arc<Mutex<Option<PathTrieMap>>>,
     backup_patterns: Option<&Vec<String>>,
 ) -> Result<()> {
     let mut map_opt = map_mutex.lock().await;

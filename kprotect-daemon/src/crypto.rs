@@ -31,7 +31,7 @@ pub fn ensure_salt() -> Result<()> {
         OsRng.fill_bytes(&mut salt);
 
         // Write salt file
-        fs::write(SALT_PATH, &salt).context("Failed to write salt file")?;
+        fs::write(SALT_PATH, salt).context("Failed to write salt file")?;
 
         // Set restrictive permissions (0400 - read-only for owner)
         #[cfg(unix)]
@@ -127,7 +127,7 @@ pub fn save_encrypted<T: serde::Serialize>(data: &T, path: &str, key: &[u8; 32])
 
     // Atomic write
     let temp_path = format!("{}.tmp", path);
-    fs::write(&temp_path, &encrypted)
+    fs::write(&temp_path, encrypted)
         .context(format!("Failed to write encrypted file: {}", temp_path))?;
 
     // Set restrictive permissions

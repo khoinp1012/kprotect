@@ -477,7 +477,7 @@ mod tests {
         // Toggle
         manager.toggle_rule(id, false).await.unwrap();
         let rules = manager.get_rules().await;
-        assert_eq!(rules[0].enabled, false);
+        assert!(!rules[0].enabled);
 
         // Remove
         manager.remove_rule(id).await.unwrap();

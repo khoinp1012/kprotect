@@ -8,57 +8,29 @@ pub struct PathConfig {
     pub blacklist: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct TrieNode {
     children: HashMap<char, TrieNode>,
     is_end_of_pattern: bool,
 }
 
-impl TrieNode {
-    fn new() -> Self {
-        Self {
-            children: HashMap::new(),
-            is_end_of_pattern: false,
-        }
-    }
-}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct Trie {
     root: TrieNode,
 }
 
 impl Trie {
-    fn new() -> Self {
-        Self {
-            root: TrieNode::new(),
-        }
-    }
 
     fn insert(&mut self, pattern: &str) {
         let mut node = &mut self.root;
         for c in pattern.chars() {
-            node = node.children.entry(c).or_insert_with(TrieNode::new);
+            node = node.children.entry(c).or_default();
         }
         node.is_end_of_pattern = true;
     }
 
     /// Checks if the input string matches any prefix in the Trie.
-    /// This is a "Longest Prefix Match" where we just need *any* prefix match effectively
-    /// for a whitelist/blacklist check (usually).
-    /// But strictly speaking, if we want to confirm if `path` starts with a pattern,
-    /// we traverse deep enough.
-    ///
-    /// The user asked for "LPM Trie", which implies Longest Prefix Match.
-    /// However, for boolean matching (is this path covered?), finding *any* matching
-    /// prefix or suffix is usually sufficient.
-    ///
-    /// For "Allow / Deny", usually the *most specific* rule wins if we had priorities.
-    /// But here we just have a SET of patterns.
-    ///
-    /// If I have `/usr/*` and `/usr/local/*`.
-    /// `/usr/local/bin/foo` matches both.
-    /// In a pure boolean "is matched" check, either is fine.
     fn matches_prefix(&self, s: &str) -> bool {
         let mut node = &self.root;
         if node.is_end_of_pattern {
@@ -79,6 +51,7 @@ impl Trie {
 }
 
 /// Matches paths against a set of exact, prefix, and suffix patterns.
+#[derive(Default)]
 pub struct PathMatcher {
     exact: HashSet<String>,
     prefixes: Trie,
@@ -87,11 +60,7 @@ pub struct PathMatcher {
 
 impl PathMatcher {
     pub fn new() -> Self {
-        Self {
-            exact: HashSet::new(),
-            prefixes: Trie::new(),
-            suffixes: Trie::new(),
-        }
+        Self::default()
     }
 
     pub fn from_config(patterns: &[String]) -> Result<Self, String> {
@@ -116,16 +85,9 @@ impl PathMatcher {
         }
 
         if asterisk_count == 1 {
-            if pattern.ends_with('*') {
-                // Prefix match: "/foo/bar/*" -> store "/foo/bar/"
-                // Or "/foo/bar*" -> store "/foo/bar"
-                // We strip the trailing '*'
-                let prefix = &pattern[..pattern.len() - 1];
+            if let Some(prefix) = pattern.strip_suffix('*') {
                 self.prefixes.insert(prefix);
-            } else if pattern.starts_with('*') {
-                // Suffix match: "*.rs" -> store "sr." (reversed)
-                // We strip the leading '*'
-                let suffix = &pattern[1..];
+            } else if let Some(suffix) = pattern.strip_prefix('*') {
                 let reversed: String = suffix.chars().rev().collect();
                 self.suffixes.insert(&reversed);
             } else {
@@ -142,18 +104,14 @@ impl PathMatcher {
     }
 
     pub fn matches(&self, path: &str) -> bool {
-        // 1. Check exact match (O(1) average)
         if self.exact.contains(path) {
             return true;
         }
 
-        // 2. Check prefix match
         if self.prefixes.matches_prefix(path) {
             return true;
         }
 
-        // 3. Check suffix match
-        // We match the reversed path against the suffixes trie
         let reversed_path: String = path.chars().rev().collect();
         if self.suffixes.matches_prefix(&reversed_path) {
             return true;
@@ -181,13 +139,7 @@ mod tests {
         matcher.add_rule("/usr/bin/*").unwrap();
         assert!(matcher.matches("/usr/bin/ls"));
         assert!(matcher.matches("/usr/bin/local/script"));
-        // Boundary check: "/usr/bin/" should match if the pattern was just "/usr/bin/*"
-        // Our logic inserts "/usr/bin/".
         assert!(matcher.matches("/usr/bin/"));
-
-        // Should not match partial prefix if not complete
-        // E.g. pattern "/usr/bin/*" stored as "/usr/bin/"
-        // Input "/usr/bi" -> mismatch 'n'
         assert!(!matcher.matches("/usr/bi"));
     }
 
@@ -198,7 +150,7 @@ mod tests {
         assert!(matcher.matches("lib.rs"));
         assert!(matcher.matches("/src/main.rs"));
         assert!(!matcher.matches("main.c"));
-        assert!(!matcher.matches("rs")); // "*.rs" implies ending with matches "sr." which includes .
+        assert!(!matcher.matches("rs"));
     }
 
     #[test]

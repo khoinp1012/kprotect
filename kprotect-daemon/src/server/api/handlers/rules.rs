@@ -25,7 +25,7 @@ pub async fn handle_zone_add(state: &Arc<AppState>, cmd: &str, caller_uid: u32) 
         );
     }
 
-    let key = state.encryption_key.clone();
+    let key = state.encryption_key;
 
     match add_zone_to_file(pattern_str, &key).await {
         Ok(p) => {
@@ -77,7 +77,7 @@ pub async fn handle_zone_remove(
         return Ok("ERROR: INVALID_ZONE_TYPE: Only 'red' zones are supported\n".to_string());
     }
 
-    let key = state.encryption_key.clone();
+    let key = state.encryption_key;
     match super::super::utils::remove_zone_from_file(pattern_str, &key).await {
         Ok(true) => {
             info!(
@@ -92,7 +92,7 @@ pub async fn handle_zone_remove(
 }
 
 pub async fn handle_zone_list(state: &Arc<AppState>) -> Result<String> {
-    let key = state.encryption_key.clone();
+    let key = state.encryption_key;
     let zones = super::super::utils::read_zones_file(&key).await?;
     Ok(format!("OK: {}\n", serde_json::to_string(&zones)?))
 }
@@ -112,7 +112,7 @@ pub async fn handle_pattern_add(
         return Ok("ERROR: INVALID_SYNTAX: Usage: PATTERN_ADD;<pattern>\n".to_string());
     }
     let pattern_str = parts[1].trim();
-    let key = state.encryption_key.clone();
+    let key = state.encryption_key;
 
     match super::super::utils::add_enrichment_pattern_to_file(pattern_str, &key).await {
         Ok(_) => {
@@ -138,7 +138,7 @@ pub async fn handle_pattern_remove(
         return Ok("ERROR: INVALID_SYNTAX: Usage: PATTERN_REMOVE;<pattern>\n".to_string());
     }
     let pattern_str = parts[1].trim();
-    let key = state.encryption_key.clone();
+    let key = state.encryption_key;
 
     match super::super::utils::remove_enrichment_pattern_from_file(pattern_str, &key).await {
         Ok(true) => {
@@ -151,7 +151,7 @@ pub async fn handle_pattern_remove(
 }
 
 pub async fn handle_pattern_list(state: &Arc<AppState>) -> Result<String> {
-    let key = state.encryption_key.clone();
+    let key = state.encryption_key;
     let patterns = super::super::utils::read_enrichment_patterns_file(&key).await?;
     let json = serde_json::json!({ "enrichment_patterns": patterns });
     Ok(format!("OK: {}\n", json))
@@ -161,7 +161,7 @@ pub async fn handle_zone_clear(state: &Arc<AppState>, caller_uid: u32) -> Result
     if caller_uid != 0 {
         return Ok("ERROR: PERMISSION: Zone modification requires root privileges\n".to_string());
     }
-    let key = state.encryption_key.clone();
+    let key = state.encryption_key;
     super::super::utils::clear_zones_file(&key).await?;
 
     // Note: eBPF map clearing is not atomic here, but it's acceptable for now
@@ -175,7 +175,7 @@ pub async fn handle_pattern_clear(state: &Arc<AppState>, caller_uid: u32) -> Res
             "ERROR: PERMISSION: Pattern modification requires root privileges\n".to_string(),
         );
     }
-    let key = state.encryption_key.clone();
+    let key = state.encryption_key;
     super::super::utils::clear_enrichment_patterns_file(&key).await?;
 
     info!("🗑️ Cleared all enrichment patterns");
@@ -184,16 +184,7 @@ pub async fn handle_pattern_clear(state: &Arc<AppState>, caller_uid: u32) -> Res
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::config::DaemonConfig;
-    use crate::core::domain::ChainTrieNode;
-    use crate::notifications::NotificationManager;
-    use crate::state::AppState;
-    use crate::state::RulesState;
-    use dashmap::DashMap;
-    use std::collections::HashMap;
-    use std::sync::RwLock;
-    use tokio::sync::broadcast;
+    // No imports needed for minimal logic tests
 
     // Helper to create a minimal AppState for testing
     // Note: We can't easily create real BpfHashMap handles here,

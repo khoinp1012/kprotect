@@ -16,6 +16,18 @@ const AUDIT_LOG_PATH: &str = "/var/log/kprotect/audit.jsonl.enc";
 
 // LogEntry is now imported from kprotect_common
 
+/// Parameters for logging a security event
+pub struct SecurityEventParams<'a> {
+    pub event_id: u64,
+    pub event: &'a BridgeEvent,
+    pub comm: &'a str,
+    pub target: &'a str,
+    pub chain: Vec<String>,
+    pub authorized: bool,
+    pub complete: bool,
+    pub label_snapshot: Vec<String>,
+}
+
 pub struct EncryptedLogger {
     events_file: Arc<Mutex<File>>,
     audit_file: Arc<Mutex<File>>,
@@ -69,25 +81,18 @@ impl EncryptedLogger {
         })
     }
 
-    /// Log a security event (BLOCK/VERIFIED/BIRTH/EXIT)
+    /// Parameters for logging a security event
     pub fn log_security_event(
         &self,
-        event_id: u64,
-        event: &BridgeEvent,
-        comm: &str,
-        target: &str,
-        chain: Vec<String>,
-        authorized: bool,
-        complete: bool,
-        label_snapshot: Vec<String>,
+        params: SecurityEventParams,
     ) -> Result<()> {
         let entry = LogEntry::SecurityEvent {
-            id: event_id,
+            id: params.event_id,
             timestamp: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),
-            status: if !authorized {
+            status: if !params.authorized {
                 "Blocked".to_string()
             } else {
-                match event.event_type {
+                match params.event.event_type {
                     1 => "Verified".to_string(),
                     2 => "Blocked".to_string(), // Event type 2 now also maps to Blocked if authorized is false, otherwise it's treated as Blocked.
                     3 => "Birth".to_string(),
@@ -95,14 +100,14 @@ impl EncryptedLogger {
                     _ => "Unknown".to_string(),
                 }
             },
-            pid: event.pid,
-            comm: comm.to_string(),
-            target: target.to_string(),
-            chain,
-            signature: format!("0x{:x}", event.signature),
-            authorized,
-            complete,
-            label_snapshot,
+            pid: params.event.pid,
+            comm: params.comm.to_string(),
+            target: params.target.to_string(),
+            chain: params.chain,
+            signature: format!("0x{:x}", params.event.signature),
+            authorized: params.authorized,
+            complete: params.complete,
+            label_snapshot: params.label_snapshot,
         };
 
         let mut file = self.events_file.lock().unwrap();
@@ -256,7 +261,7 @@ impl EncryptedLogger {
 
         // For now, we still read into memory but support pagination properly
         // In a future optimization, we can use reverse seeking to avoid loading everything
-        let lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
+        let lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
 
         let mut entries = Vec::new();
         // Skip 'offset' lines from the end, then take 'count' lines

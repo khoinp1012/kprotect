@@ -44,7 +44,7 @@ pub async fn handle_system_info(state: &Arc<AppState>) -> Result<String> {
         )
     };
 
-    let key = state.encryption_key.clone();
+    let key = state.encryption_key;
 
     let (red_zones, enrichment_patterns) = {
         let red_count = crate::server::api::utils::read_zones_file(&key)
@@ -64,90 +64,73 @@ pub async fn handle_system_info(state: &Arc<AppState>) -> Result<String> {
     let sudo_events_verified = state.sudo_events_verified.load(Ordering::SeqCst);
     let sudo_events_blocked = state.sudo_events_blocked.load(Ordering::SeqCst);
 
-    let system_info = build_system_info_json(
-        authorized_patterns_count,
-        sudo_rules_count,
+    let system_info = build_system_info_json(SystemInfoParams {
+        authorized_patterns: authorized_patterns_count,
+        sudo_rules: sudo_rules_count,
         red_zones,
         enrichment_patterns,
         events_verified,
         events_blocked,
         sudo_events_verified,
         sudo_events_blocked,
-        process_cache_size,
+        lineage_cache_size: process_cache_size,
         engine_enabled,
         file_protection_enabled,
         sudo_bypass_enabled,
-    );
+    });
 
     Ok(format!("OK: {}\n", system_info))
 }
 
-pub fn build_system_info_json(
-    authorized_patterns: usize,
-    sudo_rules: usize,
-    red_zones: usize,
-    enrichment_patterns: usize,
-    events_verified: u64,
-    events_blocked: u64,
-    sudo_events_verified: u64,
-    sudo_events_blocked: u64,
-    lineage_cache_size: usize,
-    engine_enabled: bool,
-    file_protection_enabled: bool,
-    sudo_bypass_enabled: bool,
-) -> serde_json::Value {
+pub struct SystemInfoParams {
+    pub authorized_patterns: usize,
+    pub sudo_rules: usize,
+    pub red_zones: usize,
+    pub enrichment_patterns: usize,
+    pub events_verified: u64,
+    pub events_blocked: u64,
+    pub sudo_events_verified: u64,
+    pub sudo_events_blocked: u64,
+    pub lineage_cache_size: usize,
+    pub engine_enabled: bool,
+    pub file_protection_enabled: bool,
+    pub sudo_bypass_enabled: bool,
+}
+
+pub fn build_system_info_json(params: SystemInfoParams) -> serde_json::Value {
     json!({
-        "authorized_patterns": authorized_patterns,
-        "sudo_rules_count": sudo_rules,
-        "red_zones": red_zones,
-        "enrichment_patterns": enrichment_patterns,
-        "events_verified": events_verified,
-        "events_blocked": events_blocked,
-        "sudo_events_verified": sudo_events_verified,
-        "sudo_events_blocked": sudo_events_blocked,
-        "lineage_cache_size": lineage_cache_size,
+        "authorized_patterns": params.authorized_patterns,
+        "sudo_rules_count": params.sudo_rules,
+        "red_zones": params.red_zones,
+        "enrichment_patterns": params.enrichment_patterns,
+        "events_verified": params.events_verified,
+        "events_blocked": params.events_blocked,
+        "sudo_events_verified": params.sudo_events_verified,
+        "sudo_events_blocked": params.sudo_events_blocked,
+        "lineage_cache_size": params.lineage_cache_size,
         "event_log_size_bytes": std::fs::metadata("/var/log/kprotect/events.jsonl.enc").map(|m| m.len()).unwrap_or(0),
         "audit_log_size_bytes": std::fs::metadata("/var/log/kprotect/audit.jsonl.enc").map(|m| m.len()).unwrap_or(0),
         "ebpf_maps": {
             "process_signatures": {
-                "size": lineage_cache_size,
+                "size": params.lineage_cache_size,
                 "capacity": 8192
             },
             "authorized_signatures": {
-                "size": authorized_patterns,
+                "size": params.authorized_patterns,
                 "capacity": 1024
             },
             "enrichment": {
-                "size": enrichment_patterns,
+                "size": params.enrichment_patterns,
                 "capacity": 32
             }
         },
-        "engine_enabled": engine_enabled,
-        "file_protection_enabled": file_protection_enabled,
-        "sudo_bypass_enabled": sudo_bypass_enabled,
+        "engine_enabled": params.engine_enabled,
+        "file_protection_enabled": params.file_protection_enabled,
+        "sudo_bypass_enabled": params.sudo_bypass_enabled,
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_build_system_info_json_toggles() {
-        let json = build_system_info_json(
-            5, 2, 1, 100, 10, 50, true,  // engine
-            false, // file protection
-            true,  // sudo bypass
-        );
-
-        assert_eq!(json["authorized_patterns"], 5);
-        assert_eq!(json["engine_enabled"], true);
-        assert_eq!(json["file_protection_enabled"], false);
-        assert_eq!(json["sudo_bypass_enabled"], true);
-        assert_eq!(json["events_verified"], 100);
-        assert_eq!(json["events_blocked"], 10);
-    }
-}
+// Test module moved to end of file to satisfy Clippy lint.
 
 pub async fn handle_status(state: &Arc<AppState>) -> Result<String> {
     let status = json!({
@@ -217,5 +200,35 @@ pub async fn handle_capabilities(_state: &Arc<AppState>) -> Result<String> {
         },
         "resources": ["events", "audit", "patterns", "zones", "notifications"]
     });
-    Ok(format!("OK: {}\n", caps))
+Ok(format!("OK: {}\n", caps))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_system_info_json_toggles() {
+        let json = build_system_info_json(SystemInfoParams {
+            authorized_patterns: 5,
+            sudo_rules: 2,
+            red_zones: 1,
+            enrichment_patterns: 100,
+            events_verified: 10,
+            events_blocked: 50,
+            sudo_events_verified: 0,
+            sudo_events_blocked: 0,
+            lineage_cache_size: 0,
+            engine_enabled: true, // engine
+            file_protection_enabled: false, // file protection
+            sudo_bypass_enabled: true, // sudo bypass
+        });
+
+        assert_eq!(json["authorized_patterns"], 5);
+        assert!(json["engine_enabled"].as_bool().unwrap());
+        assert!(!json["file_protection_enabled"].as_bool().unwrap());
+        assert!(json["sudo_bypass_enabled"].as_bool().unwrap());
+        assert_eq!(json["events_verified"], 100);
+        assert_eq!(json["events_blocked"], 10);
+    }
 }

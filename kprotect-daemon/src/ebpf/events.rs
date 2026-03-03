@@ -30,11 +30,14 @@ use crate::core::domain::LineageNode;
 use crate::core::process::{build_lineage_chain, cleanup_parent_chain};
 use crate::state::AppState;
 
+type AuthMap = Arc<Mutex<Option<BpfHashMap<MapData, u64, u8>>>>;
+type SigMap = Arc<Mutex<Option<BpfHashMap<MapData, u32, u64>>>>;
+
 pub async fn monitor_ebpf_events(
     map: Map,
     state: Arc<AppState>,
-    auth_map: Arc<Mutex<Option<BpfHashMap<MapData, u64, u8>>>>,
-    sig_map: Arc<Mutex<Option<BpfHashMap<MapData, u32, u64>>>>,
+    auth_map: AuthMap,
+    sig_map: SigMap,
 ) -> Result<()> {
     let mut perf_array = AsyncPerfEventArray::try_from(map)?;
     let cpus = online_cpus().map_err(|_| anyhow::anyhow!("CPUs error"))?;
@@ -51,7 +54,7 @@ pub async fn monitor_ebpf_events(
                 .map(|_| BytesMut::with_capacity(4096))
                 .collect::<Vec<_>>();
             while let Ok(events) = buf.read_events(&mut buffers).await {
-                for i in 0..events.read {
+                for (i, _) in buffers.iter().enumerate().take(events.read) {
                     let event = unsafe {
                         std::ptr::read_unaligned(buffers[i].as_ptr() as *const BridgeEvent)
                     };
@@ -70,8 +73,8 @@ pub async fn monitor_ebpf_events(
 async fn process_event(
     event: BridgeEvent,
     state: &Arc<AppState>,
-    auth_map: &Arc<Mutex<Option<BpfHashMap<MapData, u64, u8>>>>,
-    _sig_map: &Arc<Mutex<Option<BpfHashMap<MapData, u32, u64>>>>,
+    auth_map: &AuthMap,
+    _sig_map: &SigMap,
 ) -> Result<()> {
     // 1. Get configuration
     let (engine_enabled, file_protection_enabled) = {
@@ -101,7 +104,7 @@ async fn process_event(
 async fn handle_birth(
     event: BridgeEvent,
     state: &Arc<AppState>,
-    auth_map: &Arc<Mutex<Option<BpfHashMap<MapData, u64, u8>>>>,
+    auth_map: &AuthMap,
     comm: &str,
     path: &str,
 ) -> Result<()> {
@@ -354,16 +357,16 @@ async fn handle_security_event(
         chain.clone()
     };
 
-    let _ = state.logger.log_security_event(
+    let _ = state.logger.log_security_event(crate::logger::SecurityEventParams {
         event_id,
-        &event,
+        event: &event,
         comm,
-        path,
-        chain.clone(),
-        is_authorized,
-        is_complete,
+        target: path,
+        chain: chain.clone(),
+        authorized: is_authorized,
+        complete: is_complete,
         label_snapshot,
-    );
+    });
     let _ = state.event_tx.send(msg);
 
     let nm = state.notification_manager.clone();
