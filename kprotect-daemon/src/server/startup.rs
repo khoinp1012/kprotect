@@ -154,10 +154,7 @@ pub async fn start_daemon() -> Result<()> {
         red_enrichment_prefix: shared_enrichment_prefix.clone(),
         auth_map: shared_auth_map.clone(),
         logger: Arc::new(logger::EncryptedLogger::new(key)?), // Temp logger
-        notification_manager: Arc::new(notifications::NotificationManager::new(
-            Vec::new(),
-            key,
-        )),
+        notification_manager: Arc::new(notifications::NotificationManager::new(Vec::new(), key)),
         last_pam_elevations: Arc::new(DashMap::new()),
     };
 

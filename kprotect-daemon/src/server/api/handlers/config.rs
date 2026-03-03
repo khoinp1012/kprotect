@@ -337,4 +337,3 @@ mod tests {
         assert!(!rules.read().unwrap().config.sudo_bypass_enabled);
     }
 }
-

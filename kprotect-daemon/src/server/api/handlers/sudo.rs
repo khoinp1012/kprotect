@@ -33,8 +33,7 @@ async fn check_sudo_internal(state: &Arc<AppState>, cmd: &str) -> Result<String>
         let lineage_cache = state.lineage_cache.clone();
         let maybe_path = lineage_cache.get(&target_pid).map(|n| n.path.clone());
         if let Some(path) = maybe_path {
-            let (chain, complete) =
-                build_lineage_chain(target_pid, "", &path, &lineage_cache);
+            let (chain, complete) = build_lineage_chain(target_pid, "", &path, &lineage_cache);
             (chain, complete, true)
         } else {
             (vec![format!("PID:{}", target_pid)], false, false)
@@ -83,7 +82,10 @@ async fn evaluate_sudo_access(
 ) -> Result<String> {
     let (engine_enabled, sudo_bypass_enabled) = {
         let rules = state.rules.read().unwrap();
-        (rules.config.engine_enabled, rules.config.sudo_bypass_enabled)
+        (
+            rules.config.engine_enabled,
+            rules.config.sudo_bypass_enabled,
+        )
     };
     let verdict = evaluate_sudo_access_logic(
         target_pid,
@@ -442,7 +444,6 @@ pub async fn handle_sudo_clear(state: &Arc<AppState>, caller_uid: u32) -> Result
     info!("🗑️ Cleared all sudo rules");
     Ok("OK: All sudo rules cleared\n".to_string())
 }
-
 
 #[cfg(test)]
 mod tests {

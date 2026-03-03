@@ -357,16 +357,18 @@ async fn handle_security_event(
         chain.clone()
     };
 
-    let _ = state.logger.log_security_event(crate::logger::SecurityEventParams {
-        event_id,
-        event: &event,
-        comm,
-        target: path,
-        chain: chain.clone(),
-        authorized: is_authorized,
-        complete: is_complete,
-        label_snapshot,
-    });
+    let _ = state
+        .logger
+        .log_security_event(crate::logger::SecurityEventParams {
+            event_id,
+            event: &event,
+            comm,
+            target: path,
+            chain: chain.clone(),
+            authorized: is_authorized,
+            complete: is_complete,
+            label_snapshot,
+        });
     let _ = state.event_tx.send(msg);
 
     let nm = state.notification_manager.clone();

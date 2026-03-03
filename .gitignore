@@ -127,5 +127,6 @@ gui_automation_test/
 kprotect-tui/
 *.deb
 handoff*
+handoff.md
 scripts/test_local/
 session_handoff/

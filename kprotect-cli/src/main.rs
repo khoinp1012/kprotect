@@ -409,10 +409,7 @@ async fn main() -> Result<()> {
                     client
                         .authorize_pattern(&pattern_list, match_mode, description.as_deref())
                         .await?;
-                    println!(
-                        "\n✅ {}",
-                        "Pattern authorized successfully".green().bold()
-                    );
+                    println!("\n✅ {}", "Pattern authorized successfully".green().bold());
                     println!("   {} {}", "Pattern:".dimmed(), pattern.cyan());
                     println!("   {} {}", "Mode:".dimmed(), mode.cyan());
                     if let Some(desc) = description {
@@ -432,10 +429,7 @@ async fn main() -> Result<()> {
                     };
 
                     client.revoke_pattern(pattern.clone(), match_mode).await?;
-                    println!(
-                        "\n🗑️ {}",
-                        "Pattern revoked successfully".yellow().bold()
-                    );
+                    println!("\n🗑️ {}", "Pattern revoked successfully".yellow().bold());
                     println!("   {} {}", "Pattern:".dimmed(), pattern.join(" → ").cyan());
                     println!("   {} {}", "Mode:".dimmed(), mode.cyan());
                     println!();
@@ -597,7 +591,9 @@ async fn main() -> Result<()> {
             client.set_log_retention(events, audit).await?;
             println!(
                 "\n✅ {}",
-                "Kprotect Daemon is running and protecting your system.".green().bold()
+                "Kprotect Daemon is running and protecting your system."
+                    .green()
+                    .bold()
             );
             println!(
                 "   {} {} days",
@@ -685,10 +681,7 @@ async fn main() -> Result<()> {
                     let json_out = serde_json::to_string_pretty(&events)?;
                     println!("{}", json_out);
                 } else {
-                    println!(
-                        "\n📜 Security Events: (showing last {})",
-                        events.len()
-                    );
+                    println!("\n📜 Security Events: (showing last {})", events.len());
                     for e in events {
                         println!("{:?}", e);
                     }

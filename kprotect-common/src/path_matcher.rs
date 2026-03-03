@@ -14,14 +14,12 @@ struct TrieNode {
     is_end_of_pattern: bool,
 }
 
-
 #[derive(Debug, Clone, Default)]
 struct Trie {
     root: TrieNode,
 }
 
 impl Trie {
-
     fn insert(&mut self, pattern: &str) {
         let mut node = &mut self.root;
         for c in pattern.chars() {

@@ -200,7 +200,7 @@ pub async fn handle_capabilities(_state: &Arc<AppState>) -> Result<String> {
         },
         "resources": ["events", "audit", "patterns", "zones", "notifications"]
     });
-Ok(format!("OK: {}\n", caps))
+    Ok(format!("OK: {}\n", caps))
 }
 
 #[cfg(test)]
@@ -219,9 +219,9 @@ mod tests {
             sudo_events_verified: 0,
             sudo_events_blocked: 0,
             lineage_cache_size: 0,
-            engine_enabled: true, // engine
+            engine_enabled: true,           // engine
             file_protection_enabled: false, // file protection
-            sudo_bypass_enabled: true, // sudo bypass
+            sudo_bypass_enabled: true,      // sudo bypass
         });
 
         assert_eq!(json["authorized_patterns"], 5);

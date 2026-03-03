@@ -82,10 +82,7 @@ impl EncryptedLogger {
     }
 
     /// Parameters for logging a security event
-    pub fn log_security_event(
-        &self,
-        params: SecurityEventParams,
-    ) -> Result<()> {
+    pub fn log_security_event(&self, params: SecurityEventParams) -> Result<()> {
         let entry = LogEntry::SecurityEvent {
             id: params.event_id,
             timestamp: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),

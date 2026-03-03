@@ -44,10 +44,7 @@ impl ChainTrieNode {
     pub fn insert(&mut self, chain: &[String], pattern: AuthorizedPattern) {
         let mut current = self;
         for part in chain {
-            current = current
-                .children
-                .entry(part.clone())
-                .or_default();
+            current = current.children.entry(part.clone()).or_default();
         }
         current.is_terminal = true;
         current.pattern = Some(pattern);
