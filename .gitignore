@@ -129,3 +129,4 @@ kprotect-tui/
 handoff*
 handoff.md
 scripts/test_local/
+session_handoff/
